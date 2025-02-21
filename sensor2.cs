@@ -4,12 +4,10 @@ using System.IO.Ports;
 using System.Collections.Generic;
 using System.Threading;
 using System.IO;  
-using System.Globalization; 
+using System.Globalization;
 
 
 public class sensor2 : MonoBehaviour
-
-
 {
     public float Roll { get; private set; }
     public float Pitch { get; private set; }
@@ -28,6 +26,11 @@ public class sensor2 : MonoBehaviour
     private Dictionary<string, double> lastData = null;
     private int frameCount = 0;
 
+    private float throwTimestamp = 0f;
+    private float maxWz = 0f;
+    private float throwDetectedTime = -1f;
+
+    private Vector3 velocity = Vector3.zero;
     void Start()
     {
         Application.targetFrameRate = 60;
@@ -43,8 +46,7 @@ public class sensor2 : MonoBehaviour
             _csvWriter = new StreamWriter(csvPath, false);
 
             // Write a header row using semicolon as delimiter.
-            _csvWriter.WriteLine("Timestamp;ax;ay;az;wx;wy;wz;Roll;Pitch;Yaw");
-            _csvWriter.Flush();
+            _csvWriter.WriteLine("Timestamp;ax;ay;az;wx;wy;wz;Roll;Pitch;Yaw;Vx;Vy;Vz;Speed"); _csvWriter.Flush();
             Debug.Log("CSV file opened at: " + csvPath);
         }
         catch (Exception e)
@@ -80,20 +82,34 @@ public class sensor2 : MonoBehaviour
     {
         if (lastData != null)
         {
-            estimatedTimestamp += Time.deltaTime; // Add elapsed time
+            estimatedTimestamp += Time.deltaTime; // Track time
+
+            float currentWz = (float)lastData["wz"]; // Current Z-axis rotation speed
+
+            // Check if this is the highest rotation speed we've seen
+            if (Mathf.Abs(currentWz) > Mathf.Abs(maxWz))
+            {
+                maxWz = currentWz;
+                throwTimestamp = estimatedTimestamp; // Store when max rotation occurs
+            }
+
+            // Debug.Log($"Timestamp={estimatedTimestamp:F3}, wz={currentWz:F3}, Max wz={maxWz:F3}, Throw Time={throwTimestamp:F3}");
 
             Debug.Log($"Timestamp={estimatedTimestamp:F3}, ax={lastData["ax"]:F3}, " +
-                      $"ay={lastData["ay"]:F3}, az={lastData["az"]:F3}, " +
-                      $"Roll={lastData["Roll"]:F3}, Pitch={lastData["Pitch"]:F3}, Yaw={lastData["Yaw"]:F3}");
+                                  $"ay={lastData["ay"]:F3}, az={lastData["az"]:F3}, " +
+                                  $"Roll={lastData["Roll"]:F3}, Pitch={lastData["Pitch"]:F3}, Yaw={lastData["Yaw"]:F3}, Throw Time={throwTimestamp:F3}");
 
+            // Save to CSV
             _csvWriter.WriteLine(
-                $"{estimatedTimestamp:F3};" +  // plain numeric timestamp
+                $"{estimatedTimestamp:F3};" +
                 $"{lastData["ax"]:F3};{lastData["ay"]:F3};{lastData["az"]:F3};" +
                 $"{lastData["wx"]:F3};{lastData["wy"]:F3};{lastData["wz"]:F3};" +
-                $"{lastData["Roll"]:F3};{lastData["Pitch"]:F3};{lastData["Yaw"]:F3}");
-                _csvWriter.Flush();
+                $"{lastData["Roll"]:F3};{lastData["Pitch"]:F3};{lastData["Yaw"]:F3}"
+            );
+            _csvWriter.Flush();
         }
     }
+
     private void ReadDataLoop()
     {
         List<byte> buffer = new List<byte>(); // Circular buffer for finding headers
@@ -153,15 +169,24 @@ public class sensor2 : MonoBehaviour
 
         var dataDict = new Dictionary<string, double>();
 
-        dataDict["ax"] = (ax / 32768.0) * 16.0;
-        dataDict["ay"] = (ay / 32768.0) * 16.0;
-        dataDict["az"] = (az / 32768.0) * 16.0;
+        dataDict["ax"] = (ax / 32768.0) * 16.0 * 9.82f; //9.82 since otherwise gravitational units
+   
+        dataDict["az"] = (az / 32768.0) * 16.0 * 9.82f;
+
+        
+        dataDict["ay"] = (ay / 32768.0) * 16.0 * 9.82f;
+
+
         dataDict["wx"] = (wx / 32768.0) * 2000.0;
         dataDict["wy"] = (wy / 32768.0) * 2000.0;
         dataDict["wz"] = (wz / 32768.0) * 2000.0;
         dataDict["Roll"] = (roll / 32768.0) * 180.0;
         dataDict["Pitch"] = (pitch / 32768.0) * 180.0;
         dataDict["Yaw"] = (yaw / 32768.0) * 180.0;
+       
+        
+        
+
 
         Roll = (float)dataDict["Roll"];
         Pitch = (float)dataDict["Pitch"];
@@ -189,21 +214,29 @@ public class sensor2 : MonoBehaviour
 
     void OnDestroy()
     {
-        // Stop reading.
+        // Save throw timestamp for later analysis
+        using (StreamWriter writer = new StreamWriter(Application.dataPath + "/throw_detected.txt", false))
+        {
+            writer.WriteLine($"Throw detected at {throwTimestamp:F3} seconds");
+        }
+
+        Debug.Log($"Throw detected at {throwTimestamp:F3} seconds");
+
+        // Stop reading
         _keepReading = false;
         if (_readThread != null && _readThread.IsAlive)
         {
             _readThread.Join();
         }
 
-        // Close serial port.
+        // Close serial port
         if (_serialPort != null && _serialPort.IsOpen)
         {
             _serialPort.Close();
             Debug.Log("Serial port closed.");
         }
 
-        // 5) Close the CSV file.
+        // Close CSV file
         if (_csvWriter != null)
         {
             _csvWriter.Close();
