@@ -12,9 +12,46 @@ using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Storage.Streams;
 #endif
 
+
 public class SensorBluetooth : MonoBehaviour
 {
+    public delegate void ThrowDetectedEvent(ThrowData throwData);
+    public static event ThrowDetectedEvent OnThrowDetected;
+
+    private bool isDetectingThrow = false; // Flag to control if we are detecting a throw
+
     public TextMeshProUGUI connectionStatusText; // UI element for displaying connection status
+
+    private Dictionary<string, double> lastData = null;
+    private Dictionary<string, double> actualThrow = null;
+
+    private Thread _readThread;
+    private float estimatedTimestamp = 0f;
+    private float updateInterval = 1f / 200f;
+
+    private float throwTimestamp = 0f;
+    private float maxWz = 0f;
+    private float throwDetectedTime = -1f;
+    private float endThrow = 0f;
+
+    private Vector3 velocity = Vector3.zero;
+
+    public void StartNewThrowDetection()
+    {
+        // Start the throw detection process
+        isDetectingThrow = true;
+
+        lastData = null;
+        actualThrow = null;
+
+        // Reset throw-related variables
+        throwTimestamp = 0f;
+        maxWz = 0f;
+        throwDetectedTime = -1f;
+        endThrow = 0f;
+        velocity = Vector3.zero;
+    }
+
 
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;
@@ -22,26 +59,44 @@ public class SensorBluetooth : MonoBehaviour
     //private ulong sensorAddress = 0xF3_54_9C_0C_0C_F5; // Fria sensorn
     private ulong sensorAddress = 0xC9_65_16_F6_7A_25; //Disc sensorn
 
-    private Dictionary<string, double> lastData = null;
-    public float Roll { get; private set; }
-    public float Pitch { get; private set; }
-    public float Yaw { get; private set; }
-
-    private Thread _readThread;
-    private float estimatedTimestamp = 0f;
-
     void Start()
     {
         estimatedTimestamp = Time.time; // Start timestamp at Unity's current time
         UpdateConnectionStatus("Connecting...");
+        isDetectingThrow = true;
         ConnectToDevice(sensorAddress);
+
     }
 
     void Update()
     {
-        if (lastData != null)
+
+        if (isDetectingThrow && lastData != null)
         {
-            estimatedTimestamp += Time.deltaTime; // Add elapsed time
+
+            estimatedTimestamp += Time.deltaTime; // Track time
+
+            float currentWz = (float)lastData["wz"]; // Current Z-axis rotation speed
+
+            // Check if this is the highest rotation speed we've seen
+            if (Mathf.Abs(currentWz) > Mathf.Abs(maxWz))
+            {
+                maxWz = currentWz;
+                throwTimestamp = estimatedTimestamp; // Store when max rotation occurs
+                actualThrow = lastData;
+            }
+
+            if (OnThrowDetected != null)
+            {
+                ThrowData throwData = new ThrowData(throwTimestamp, estimatedTimestamp - throwTimestamp, actualThrow);
+                isDetectingThrow = false;
+                OnThrowDetected(throwData);
+            }
+
+
+
+
+
 
             Debug.Log($"Timestamp={estimatedTimestamp:F3} ,\n ax={lastData["ax"]:F3}, \n" +
                       $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3},\n " +
@@ -51,7 +106,7 @@ public class SensorBluetooth : MonoBehaviour
             UpdateConnectionStatus($"Timestamp={estimatedTimestamp:F3},\n ax={lastData["ax"]:F3},\n " +
                       $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3}, \n" +
                       $"Roll={lastData["Roll"]:F3},\n Pitch={lastData["Pitch"]:F3},\n Yaw={lastData["Yaw"]:F3}\n" +
-                        $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3};");
+                        $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
 
         }             
     }
@@ -134,23 +189,23 @@ public class SensorBluetooth : MonoBehaviour
             ["ax"] = (ax / 32768.0) * 16.0 * 9.82f,
             ["ay"] = (ay / 32768.0) * 16.0 * 9.82f,
             ["az"] = (az / 32768.0) * 16.0 * 9.82f,
+
             ["wx"] = (wx / 32768.0) * 2000.0,
             ["wy"] = (wy / 32768.0) * 2000.0,
             ["wz"] = (wz / 32768.0) * 2000.0,
+
             ["Roll"] = (roll / 32768.0) * 180.0,
             ["Pitch"] = (pitch / 32768.0) * 180.0,
             ["Yaw"] = (yaw / 32768.0) * 180.0
         };
 
-        Roll = (float)dataDict["Roll"];
-        Pitch = (float)dataDict["Pitch"];
-        Yaw = (float)dataDict["Yaw"];
 
         lock (this)
         {
             lastData = dataDict;
         }
     }
+
 
     private void UpdateConnectionStatus(string status)
     {
@@ -162,6 +217,8 @@ public class SensorBluetooth : MonoBehaviour
 
     void OnDestroy()
     {
+        Debug.Log($"Throw detected at {throwTimestamp:F3} seconds");
+
         if (device != null)
         {
             device.Dispose();
