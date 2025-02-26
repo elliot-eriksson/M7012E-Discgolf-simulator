@@ -5,49 +5,41 @@ using System.Collections.Generic;
 using System.Threading;
 using System.IO;
 
-
 public class sensor2 : MonoBehaviour
 {
-    public float Roll { get; private set; }
-    public float Pitch { get; private set; }
-    public float Yaw { get; private set; }
-    private float estimatedTimestamp = 0f;
-    private float updateInterval = 1f / 200f;
-    [SerializeField] private string portName = "COM5";
-    [SerializeField] private int baudRate = 115200;
+    [SerializeField] private string portName = "COM5";                  //Port for sensor USB
+    [SerializeField] private int baudRate = 115200;                     //Rate from sensor 
+    [SerializeField] private float stableDelay = 0.2f;                  //Delay range for stability check
+    [SerializeField] private float changeThreshold = 100f;              //Threshold for 
+    [SerializeField] private float throwThreshold = 600f;
+    [SerializeField] private int thresholdSamplesNeeded = 3;            //Amount of needed succesive datapoints
+    [SerializeField] private int stableSamplesNeeded = 3;               //Same as thersholdSamplesNeeded but for other case
+    [SerializeField] private float nearZeroThreshold = 150f;            //Find end of throw
+    [SerializeField] private int nearZeroSamplesNeeded = 2;             //Consecutive for end of throw
+    
+    public float Roll { get; private set; }                             //Rotatation 
+    public float Pitch { get; private set; }                            //Left right 
+    public float Yaw { get; private set; }                              //Front back
 
-    // We'll handle stable flight in THROWN via a time delay + minimal change checks
-    [SerializeField] private float stableDelay = 0.2f;      // NEW: how many seconds to wait after a throw is detected
-    private float timeSinceThrown = 0f;                    // NEW: how long we've been in THROWN
-    private bool finalCenterSet = false;                   // NEW: have we computed the final center after the delay?
+    private float estimatedTimestamp = 0f;                              
+    private float timeSinceThrown = 0f;                                 
+    private float dynamicCenter = 0f;                                   //Range in rotation for a throw
+    private float throwStartTime = -1f;                             
+    private float flightEndTime = -1f;                      
 
-    // For minimal change detection
-    [SerializeField] private float changeThreshold = 100f;  // how many deg/s difference is considered "small"?
-    private int stableDeltaCounter = 0;                    // how many consecutive frames had a small Δwz?
-
-    // Step 1: Throw detection states
-    private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }
-    private ThrowState currentThrowState = ThrowState.IDLE;
-
-    [SerializeField] private float throwThreshold = 600f;       // For crossing from IDLE -> THROWN
-    [SerializeField] private int thresholdSamplesNeeded = 3;   // # of consecutive frames above throwThreshold
-    private int thresholdCounter = 0;
-
-    // We'll capture the rotation at the moment of throw
-    private float dynamicCenter = 0f;
-
-    // Used once we're in THROWN
-    [SerializeField] private float stableBand = 200f;
-    [SerializeField] private int stableSamplesNeeded = 3;
-    private int stableCounter = 0;
-
-    // Used once we're in IN_FLIGHT
-    [SerializeField] private float nearZeroThreshold = 150f;
-    [SerializeField] private int nearZeroSamplesNeeded = 2;
+    private int stableDeltaCounter = 0;                                 //Delta for center 
     private int nearZeroCounter = 0;
+    private bool finalCenterSet = false;    
 
-    private float throwStartTime = -1f;
-    private float flightEndTime = -1f;
+
+    private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }           //State machine for a throw or not
+    private ThrowState currentThrowState = ThrowState.IDLE;             //Starting value for state machine
+
+
+    private Vector3 velocity = Vector3.zero;         // integrated velocity
+    private Vector3 lastAcceleration = Vector3.zero; // acceleration from the previous frame
+    private bool isIntegratingVelocity = false;      // are we currently tracking velocity in-flight?
+
 
     // --------------------------------------------------------------------------------
     // RING BUFFER to track recent samples (time + wz) so we can retroactively find
@@ -59,34 +51,28 @@ public class sensor2 : MonoBehaviour
         public float wz;
     }
 
-    // You can store more frames if you want (e.g. 30-60) so you have some history
     private const int RING_BUFFER_CAPACITY = 30;
     private List<FrameSample> ringBuffer = new List<FrameSample>(RING_BUFFER_CAPACITY);
 
-    // Existing fields...
     private SerialPort _serialPort;
     private Thread _readThread;
     private bool _keepReading = false;
     private StreamWriter _csvWriter;
     private Dictionary<string, double> lastData = null;
-    private float throwTimestamp = 0f;
-    private float maxWz = 0f;
-    private float throwDetectedTime = -1f;
-    private Vector3 velocity = Vector3.zero;
 
     void Start()
     {
         Application.targetFrameRate = 30;
         estimatedTimestamp = Time.time;
 
-        // 1) Open or create a CSV file.
+        // open or create a CSV file.
         string csvPath = Application.dataPath + "/BWT901_log_" +
                   DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv";
 
         try
         {
             _csvWriter = new StreamWriter(csvPath, false);
-            _csvWriter.WriteLine("Timestamp;ax;ay;az;wx;wy;wz;Roll;Pitch;Yaw;Vx;Vy;Vz;Speed");
+            _csvWriter.WriteLine("Timestamp;ax;ay;az;wx;wy;wz;Roll;Pitch;Yaw;Speed");
             _csvWriter.Flush();
             Debug.Log("CSV file opened at: " + csvPath);
         }
@@ -95,7 +81,7 @@ public class sensor2 : MonoBehaviour
             Debug.LogError("Could not open CSV file for writing: " + e.Message);
         }
 
-        // 2) Initialize and open the serial port.
+        // Initialize and open the serial port.
         _serialPort = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 500;
         _serialPort.Handshake = Handshake.None;
@@ -107,7 +93,7 @@ public class sensor2 : MonoBehaviour
             _serialPort.Open();
             Debug.Log("Serial port opened successfully.");
 
-            // 3) Start a background thread to read the sensor data.
+            // Start a background thread to read the sensor data.
             _keepReading = true;
             _readThread = new Thread(ReadDataLoop);
             _readThread.Start();
@@ -125,7 +111,37 @@ public class sensor2 : MonoBehaviour
         estimatedTimestamp += Time.deltaTime;
         float currentWz = (float)lastData["wz"];
 
-        // 1) Add current sample to ringBuffer
+
+        float ax = (float)lastData["ax"]; // m/s^2
+        float ay = (float)lastData["ay"];
+        float az = (float)lastData["az"];
+
+        float rollDeg = (float)lastData["Roll"];
+        float pitchDeg = (float)lastData["Pitch"];
+        float yawDeg = (float)lastData["Yaw"];
+
+        Vector3 currentAcceleration = new Vector3(ax, ay, az);
+
+        //Ingeration of acceleration to get velocity
+        if (isIntegratingVelocity)
+        {
+            Quaternion sensorToWorld = Quaternion.Euler(pitchDeg, yawDeg, rollDeg);
+
+            // Local acceleration vector
+            Vector3 accelLocal = new Vector3(ax, ay, az);
+
+            // Rotate to world frame
+            Vector3 accelWorld = sensorToWorld * accelLocal;
+            accelWorld.y -= 9.81f;
+
+            // Integrate
+            float dt = Time.deltaTime;
+            velocity += accelWorld * dt;
+        }
+
+        float speed = velocity.magnitude;
+
+        // Add current sample to ringBuffer
         FrameSample sample = new FrameSample { time = estimatedTimestamp, wz = currentWz };
         ringBuffer.Add(sample);
         if (ringBuffer.Count > RING_BUFFER_CAPACITY)
@@ -147,14 +163,15 @@ public class sensor2 : MonoBehaviour
                     if (consecutiveCount >= thresholdSamplesNeeded)
                     {
                         currentThrowState = ThrowState.THROWN;
-                        timeSinceThrown = 0f;        // NEW: start our timer
-                        finalCenterSet = false;      // NEW: we haven't computed final center yet
+                        timeSinceThrown = 0f;        
+                        finalCenterSet = false;
 
-                        // Mark throw start time retroactively
+                        velocity = Vector3.zero;
+                        isIntegratingVelocity = true;   // begin integration
+
+
                         int earliestIndex = ringBuffer.Count - consecutiveCount;
                         throwStartTime = ringBuffer[earliestIndex].time;
-
-                        // Temporary center (just use last sample for now)
                         dynamicCenter = ringBuffer[ringBuffer.Count - 1].wz;
                         Debug.Log($"[STATE] Throw DETECTED at {throwStartTime:F3}, temporaryCenter={dynamicCenter:F2}");
                     }
@@ -169,19 +186,16 @@ public class sensor2 : MonoBehaviour
                     // compute dynamicCenter from the last few frames
                     if (!finalCenterSet && timeSinceThrown >= stableDelay)
                     {
-                        finalCenterSet = true;  // only do this once
-
-                        // For example, average the last 5 frames
+                        finalCenterSet = true;  
                         int framesToAvg = Mathf.Min(5, ringBuffer.Count);
                         float sum = 0f;
+
                         for (int i = ringBuffer.Count - framesToAvg; i < ringBuffer.Count; i++)
                             sum += ringBuffer[i].wz;
                         dynamicCenter = sum / framesToAvg;
                         Debug.Log($"[THROWN] Final center set to {dynamicCenter:F2} after delay");
                     }
 
-                    // Once we have a final center, we do minimal-change checks:
-                    // i.e., if consecutive frames differ by < changeThreshold from one update to the next.
                     if (finalCenterSet && ringBuffer.Count > 1)
                     {
                         // Compare the last 2 frames
@@ -204,8 +218,6 @@ public class sensor2 : MonoBehaviour
                             Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3}, center~{dynamicCenter:F2}");
                         }
                     }
-
-                    // (Optional) If you want a partial “abort” if rotation dips below threshold for multiple frames, add that here
                 }
                 break;
 
@@ -231,18 +243,19 @@ public class sensor2 : MonoBehaviour
                 break;
 
             case ThrowState.DONE:
-                // Possibly do nothing or revert to IDLE if you want multiple throws
+
+                isIntegratingVelocity = false;
+
                 break;
         }
 
-        //Debug.Log(ringBuffer);
-
-        // Save to CSV (unchanged)
+        //Debug.Log($"Velocity=({velocity.x:F2}, {velocity.y:F2}, {velocity.z:F2}), Speed={speed:F2}");
+        // Save to CSV
         _csvWriter.WriteLine(
             $"{estimatedTimestamp:F3};" +
             $"{lastData["ax"]:F3};{lastData["ay"]:F3};{lastData["az"]:F3};" +
             $"{lastData["wx"]:F3};{lastData["wy"]:F3};{lastData["wz"]:F3};" +
-            $"{lastData["Roll"]:F3};{lastData["Pitch"]:F3};{lastData["Yaw"]:F3}"
+            $"{lastData["Roll"]:F3};{lastData["Pitch"]:F3};{lastData["Yaw"]:F3};{speed:F2}"
         );
         _csvWriter.Flush();
     }
@@ -279,8 +292,8 @@ public class sensor2 : MonoBehaviour
             }
         }
     }
-
-    private void ProcessSensorData(byte[] data)
+        
+    private void ProcessSensorData(byte[] data)                             //Setup for the diffrent retrived values of the sensor 
     {
         short ax = (short)((data[3] << 8) | data[2]);
         short ay = (short)((data[5] << 8) | data[4]);
@@ -315,6 +328,9 @@ public class sensor2 : MonoBehaviour
 
     void OnDestroy()
     {
+
+        
+
         _keepReading = false;
         if (_readThread != null && _readThread.IsAlive)
         {
