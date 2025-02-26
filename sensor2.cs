@@ -16,27 +16,34 @@ public class sensor2 : MonoBehaviour
     [SerializeField] private string portName = "COM5";
     [SerializeField] private int baudRate = 115200;
 
+    // We'll handle stable flight in THROWN via a time delay + minimal change checks
+    [SerializeField] private float stableDelay = 0.2f;      // NEW: how many seconds to wait after a throw is detected
+    private float timeSinceThrown = 0f;                    // NEW: how long we've been in THROWN
+    private bool finalCenterSet = false;                   // NEW: have we computed the final center after the delay?
+
+    // For minimal change detection
+    [SerializeField] private float changeThreshold = 100f;  // how many deg/s difference is considered "small"?
+    private int stableDeltaCounter = 0;                    // how many consecutive frames had a small Δwz?
+
     // Step 1: Throw detection states
     private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }
     private ThrowState currentThrowState = ThrowState.IDLE;
 
     [SerializeField] private float throwThreshold = 600f;       // For crossing from IDLE -> THROWN
-    [SerializeField] private int thresholdSamplesNeeded = 6;   // # of consecutive frames above throwThreshold
-    //private int thresholdCounter = 0;
+    [SerializeField] private int thresholdSamplesNeeded = 3;   // # of consecutive frames above throwThreshold
+    private int thresholdCounter = 0;
 
     // We'll capture the rotation at the moment of throw
     private float dynamicCenter = 0f;
 
     // Used once we're in THROWN
-    [SerializeField] private float stableBand = 100f;
-    [SerializeField] private float stableRotationCenter = -1400f;
-    [SerializeField] private float stableRotationBand = 60f;
-    [SerializeField] private int stableSamplesNeeded = 6;
+    [SerializeField] private float stableBand = 200f;
+    [SerializeField] private int stableSamplesNeeded = 3;
     private int stableCounter = 0;
 
     // Used once we're in IN_FLIGHT
-    [SerializeField] private float nearZeroThreshold = 100f;
-    [SerializeField] private int nearZeroSamplesNeeded = 5;
+    [SerializeField] private float nearZeroThreshold = 150f;
+    [SerializeField] private int nearZeroSamplesNeeded = 2;
     private int nearZeroCounter = 0;
 
     private float throwStartTime = -1f;
@@ -118,118 +125,108 @@ public class sensor2 : MonoBehaviour
         estimatedTimestamp += Time.deltaTime;
         float currentWz = (float)lastData["wz"];
 
-        // Track the max rotation for reference
-        if (Mathf.Abs(currentWz) > Mathf.Abs(maxWz))
-        {
-            maxWz = currentWz;
-            throwTimestamp = estimatedTimestamp;
-        }
-
-        // --------------------------------------------------------------------------------
-        //  Push the current frame into our ring buffer (time + wz). 
-        //  If we exceed capacity, remove the oldest sample.
-        // --------------------------------------------------------------------------------
+        // 1) Add current sample to ringBuffer
         FrameSample sample = new FrameSample { time = estimatedTimestamp, wz = currentWz };
         ringBuffer.Add(sample);
         if (ringBuffer.Count > RING_BUFFER_CAPACITY)
-        {
             ringBuffer.RemoveAt(0);
-        }
 
-        // --------------------------------------------------------------------------------
-        //  State Machine
-        // --------------------------------------------------------------------------------
         switch (currentThrowState)
         {
             case ThrowState.IDLE:
                 {
-                    // We look at the end of the ringBuffer to see how many consecutive samples 
-                    // are above the throwThreshold, going backwards from the newest sample.
+                    // Count how many consecutive frames from the end are above throwThreshold
                     int consecutiveCount = 0;
                     for (int i = ringBuffer.Count - 1; i >= 0; i--)
                     {
-                        float wzVal = ringBuffer[i].wz;
-                        if (Mathf.Abs(wzVal) >= throwThreshold)
-                        {
+                        if (Mathf.Abs(ringBuffer[i].wz) >= throwThreshold)
                             consecutiveCount++;
-                        }
                         else
-                        {
-                            // As soon as we find one sample below threshold, stop counting.
                             break;
-                        }
                     }
-
-                    // If we found enough consecutive frames at the end of the buffer:
                     if (consecutiveCount >= thresholdSamplesNeeded)
                     {
-                        // 1) Transition to THROWN
                         currentThrowState = ThrowState.THROWN;
+                        timeSinceThrown = 0f;        // NEW: start our timer
+                        finalCenterSet = false;      // NEW: we haven't computed final center yet
 
-                        // 2) The earliest sample of that run is:
+                        // Mark throw start time retroactively
                         int earliestIndex = ringBuffer.Count - consecutiveCount;
-                        float realStartTime = ringBuffer[earliestIndex].time;
-                        throwStartTime = realStartTime;
+                        throwStartTime = ringBuffer[earliestIndex].time;
 
-                        // 3) Pick a dynamicCenter. 
-                        // For example, use the last sample's rotation (the newest sample).
-                        // Or compute an average of those consecutive frames for a smoother center.
-                        float lastWz = ringBuffer[ringBuffer.Count - 1].wz;
-                        dynamicCenter = lastWz;
-
-                        Debug.Log($"[STATE] Throw detected! Real start time = {throwStartTime:F3}, dynamicCenter={dynamicCenter:F2}");
+                        // Temporary center (just use last sample for now)
+                        dynamicCenter = ringBuffer[ringBuffer.Count - 1].wz;
+                        Debug.Log($"[STATE] Throw DETECTED at {throwStartTime:F3}, temporaryCenter={dynamicCenter:F2}");
                     }
                 }
                 break;
 
-
             case ThrowState.THROWN:
-                //Debug.Log("THROWN");
-                // If current rotation is close to dynamicCenter, increment stableCounter
-                if (currentWz > dynamicCenter - stableBand &&
-                    currentWz < dynamicCenter + stableBand)
                 {
-                    stableCounter++;
-                    Debug.Log("Counter="+stableCounter);
-                    if (stableCounter >= stableSamplesNeeded)
-                    {
-                        currentThrowState = ThrowState.IN_FLIGHT;
-                        Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3} (center={dynamicCenter:F2})");
-                    }
-                }
-                else
-                {
-                    // Not in the band => reset stableCounter
-                    stableCounter = 0;
+                    timeSinceThrown += Time.deltaTime;
 
-                    Debug.Log(Mathf.Abs(currentWz));
-                    // If rotation
-                    // dips below the throw threshold again, it's probably a false start
-                    //if (Mathf.Abs(currentWz) < throwThreshold)
-                    //{
-                    //    currentThrowState = ThrowState.IDLE;
-                    //    thresholdCounter = 0;
-                    //    Debug.Log("[STATE] Throw aborted. Back to IDLE.");
-                    //}
+                    // If we haven't set our final center yet and the stableDelay has passed,
+                    // compute dynamicCenter from the last few frames
+                    if (!finalCenterSet && timeSinceThrown >= stableDelay)
+                    {
+                        finalCenterSet = true;  // only do this once
+
+                        // For example, average the last 5 frames
+                        int framesToAvg = Mathf.Min(5, ringBuffer.Count);
+                        float sum = 0f;
+                        for (int i = ringBuffer.Count - framesToAvg; i < ringBuffer.Count; i++)
+                            sum += ringBuffer[i].wz;
+                        dynamicCenter = sum / framesToAvg;
+                        Debug.Log($"[THROWN] Final center set to {dynamicCenter:F2} after delay");
+                    }
+
+                    // Once we have a final center, we do minimal-change checks:
+                    // i.e., if consecutive frames differ by < changeThreshold from one update to the next.
+                    if (finalCenterSet && ringBuffer.Count > 1)
+                    {
+                        // Compare the last 2 frames
+                        float wzCurr = ringBuffer[ringBuffer.Count - 1].wz;
+                        float wzPrev = ringBuffer[ringBuffer.Count - 2].wz;
+                        float delta = Mathf.Abs(wzCurr - wzPrev);
+
+                        if (delta < changeThreshold)
+                        {
+                            stableDeltaCounter++;
+                        }
+                        else
+                        {
+                            stableDeltaCounter = 0;
+                        }
+
+                        if (stableDeltaCounter >= stableSamplesNeeded)
+                        {
+                            currentThrowState = ThrowState.IN_FLIGHT;
+                            Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3}, center~{dynamicCenter:F2}");
+                        }
+                    }
+
+                    // (Optional) If you want a partial “abort” if rotation dips below threshold for multiple frames, add that here
                 }
                 break;
 
             case ThrowState.IN_FLIGHT:
-                Debug.Log("IN FLIGHT");
-                // If rotation dips below nearZeroThreshold for enough frames, we're done
-                if (Mathf.Abs(currentWz) < nearZeroThreshold)
                 {
-                    nearZeroCounter++;
-                    if (nearZeroCounter >= nearZeroSamplesNeeded)
+                    // If rotation dips below nearZeroThreshold for enough frames, we're done
+                    float absWz = Mathf.Abs(currentWz);
+                    if (absWz < nearZeroThreshold)
                     {
-                        currentThrowState = ThrowState.DONE;
-                        flightEndTime = estimatedTimestamp;
-                        Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
+                        nearZeroCounter++;
+                        if (nearZeroCounter >= nearZeroSamplesNeeded)
+                        {
+                            currentThrowState = ThrowState.DONE;
+                            flightEndTime = estimatedTimestamp;
+                            Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
+                        }
                     }
-                }
-                else
-                {
-                    nearZeroCounter = 0;
+                    else
+                    {
+                        nearZeroCounter = 0;
+                    }
                 }
                 break;
 
