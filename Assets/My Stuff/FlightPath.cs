@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System.Collections;
+using TMPro;
 
 
 public class FlightPath : MonoBehaviour
@@ -8,7 +9,10 @@ public class FlightPath : MonoBehaviour
     public Transform discObject; // Assign your disc in Unity
     public LineRenderer trajectoryLine; // Assign a LineRenderer to visualize the trajectory
 
-    private List<Vector3> logDataPoints = new List<Vector3>(); // Store trajectory points
+    public TextMeshProUGUI flightText; // UI element for displaying connection status
+
+
+    private List<Vector3> replayDataPoints = new List<Vector3>(); // Store trajectory points
     private bool isReplaying = false;
     private int currentReplayIndex = 0;
     void OnEnable()
@@ -31,7 +35,7 @@ public class FlightPath : MonoBehaviour
             Debug.LogWarning("No trajectory points received!");
             return;
         }
-        logDataPoints = trajectoryPoints; // Store the trajectory points
+        replayDataPoints = trajectoryPoints; // Store the trajectory points
 
         DisplayTrajectory(trajectoryPoints);
     }
@@ -48,7 +52,9 @@ public class FlightPath : MonoBehaviour
         // Gradually set each position with a small delay
         for (int i = 0; i < trajectoryPoints.Count; i++)
         {
+            UpdateConnectionStatus($"Displaying point {i + 1}/{trajectoryPoints.Count}: {trajectoryPoints[i]}");
             trajectoryLine.SetPosition(i, trajectoryPoints[i]);
+            discObject.position = trajectoryPoints[i];
             yield return new WaitForSeconds(0.05f); // Adjust the delay to suit the desired speed
         }
     }
@@ -56,7 +62,7 @@ public class FlightPath : MonoBehaviour
     // Method to start/replay the flight path
     public void ReplayFlightPath()
     {
-        if (logDataPoints.Count == 0)
+        if (replayDataPoints.Count == 0)
         {
             Debug.LogWarning("No flight path data available to replay!");
             return;
@@ -73,12 +79,12 @@ public class FlightPath : MonoBehaviour
     private IEnumerator ReplayCoroutine()
     {
         isReplaying = true;
-        trajectoryLine.positionCount = logDataPoints.Count;
+        trajectoryLine.positionCount = replayDataPoints.Count;
 
-        while (currentReplayIndex < logDataPoints.Count)
+        while (currentReplayIndex < replayDataPoints.Count)
         {
             // Set the current position for the LineRenderer
-            trajectoryLine.SetPosition(currentReplayIndex, logDataPoints[currentReplayIndex]);
+            trajectoryLine.SetPosition(currentReplayIndex, replayDataPoints[currentReplayIndex]);
 
             // Wait for a short period before moving to the next point in the trajectory
             currentReplayIndex++;
@@ -86,5 +92,13 @@ public class FlightPath : MonoBehaviour
         }
 
         isReplaying = false;
+    }
+
+    private void UpdateConnectionStatus(string status)
+    {
+        if (flightText != null)
+        {
+            flightText.text = status;
+        }
     }
 }

@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class ThrowData
+public class ThrowData : MonoBehaviour
 {
     public float timeOfThrow;
     public float throwTimeDelta;

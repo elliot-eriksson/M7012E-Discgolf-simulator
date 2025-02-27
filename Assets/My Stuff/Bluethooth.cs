@@ -20,7 +20,9 @@ public class SensorBluetooth : MonoBehaviour
 
     private bool isDetectingThrow = false; // Flag to control if we are detecting a throw
 
-    public TextMeshProUGUI connectionStatusText; // UI element for displaying connection status
+    public TextMeshProUGUI connectionStatusText; 
+    //public TextMeshProUGUI tempText; 
+
 
     private Dictionary<string, double> lastData = null;
     private Dictionary<string, double> actualThrow = null;
@@ -53,14 +55,56 @@ public class SensorBluetooth : MonoBehaviour
     }
 
 
+    // Step 1: Throw detection states
+    private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }
+    private ThrowState currentThrowState = ThrowState.IDLE;
+
+    [SerializeField] private float throwThreshold = 600f;       // For crossing from IDLE -> THROWN
+    [SerializeField] private int thresholdSamplesNeeded = 6;   // # of consecutive frames above throwThreshold
+
+    // We'll capture the rotation at the moment of throw
+    private float dynamicCenter = 0f;
+
+    // Used once we're in THROWN
+    [SerializeField] private float stableBand = 100f;
+    [SerializeField] private float stableRotationCenter = -1400f;
+    [SerializeField] private float stableRotationBand = 60f;
+    [SerializeField] private int stableSamplesNeeded = 6;
+    private int stableCounter = 0;
+
+    // Used once we're in IN_FLIGHT
+    [SerializeField] private float nearZeroThreshold = 100f;
+    [SerializeField] private int nearZeroSamplesNeeded = 5;
+    private int nearZeroCounter = 0;
+
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;
     private GattCharacteristic characteristic;
     //private ulong sensorAddress = 0xF3_54_9C_0C_0C_F5; // Fria sensorn
     private ulong sensorAddress = 0xC9_65_16_F6_7A_25; //Disc sensorn
 
+
+    private float throwStartTime = -1f;
+    private float flightEndTime = -1f;
+
+    // --------------------------------------------------------------------------------
+    // RING BUFFER to track recent samples (time + wz) so we can retroactively find
+    // the start of the throw when we confirm thresholdSamplesNeeded consecutive frames.
+    // --------------------------------------------------------------------------------
+    private struct FrameSample
+    {
+        public float time;
+        public float wz;
+    }
+
+    // You can store more frames if you want (e.g. 30-60) so you have some history
+    private const int RING_BUFFER_CAPACITY = 30;
+    private List<FrameSample> ringBuffer = new List<FrameSample>(RING_BUFFER_CAPACITY);
+
+
     void Start()
     {
+        Application.targetFrameRate = 30;
         estimatedTimestamp = Time.time; // Start timestamp at Unity's current time
         UpdateConnectionStatus("Connecting...");
         isDetectingThrow = true;
@@ -86,26 +130,128 @@ public class SensorBluetooth : MonoBehaviour
                 actualThrow = lastData;
             }
 
-            if (OnThrowDetected != null)
+
+
+            FrameSample sample = new FrameSample { time = estimatedTimestamp, wz = currentWz };
+            ringBuffer.Add(sample);
+            if (ringBuffer.Count > RING_BUFFER_CAPACITY)
             {
-                ThrowData throwData = new ThrowData(throwTimestamp, estimatedTimestamp - throwTimestamp, actualThrow);
-                isDetectingThrow = false;
-                OnThrowDetected(throwData);
+                ringBuffer.RemoveAt(0);
             }
 
 
+            switch (currentThrowState)
+            {
+                case ThrowState.IDLE:
+                    {
+                        // We look at the end of the ringBuffer to see how many consecutive samples 
+                        // are above the throwThreshold, going backwards from the newest sample.
+                        int consecutiveCount = 0;
+                        for (int i = ringBuffer.Count - 1; i >= 0; i--)
+                        {
+                            float wzVal = ringBuffer[i].wz;
+                            if (Mathf.Abs(wzVal) >= throwThreshold)
+                            {
+                                consecutiveCount++;
+                            }
+                            else
+                            {
+                                // As soon as we find one sample below threshold, stop counting.
+                                break;
+                            }
+                        }
 
+                        // If we found enough consecutive frames at the end of the buffer:
+                        if (consecutiveCount >= thresholdSamplesNeeded)
+                        {
+                            // 1) Transition to THROWN
+                            currentThrowState = ThrowState.THROWN;
+                            
+
+                            // 2) The earliest sample of that run is:
+                            int earliestIndex = ringBuffer.Count - consecutiveCount;
+                            float realStartTime = ringBuffer[earliestIndex].time;
+                            throwStartTime = realStartTime;
+
+                            // 3) Pick a dynamicCenter. 
+                            // For example, use the last sample's rotation (the newest sample).
+                            // Or compute an average of those consecutive frames for a smoother center.
+                            float lastWz = ringBuffer[ringBuffer.Count - 1].wz;
+                            dynamicCenter = lastWz;
+
+                            Debug.Log($"[STATE] Throw detected! Real start time = {throwStartTime:F3}, dynamicCenter={dynamicCenter:F2}");
+                        }
+                    }
+                    break;
+
+
+                case ThrowState.THROWN:
+                    //Debug.Log("THROWN");
+                    //TempTextStatus("THROWN");
+                    // If current rotation is close to dynamicCenter, increment stableCounter
+                    if (currentWz > dynamicCenter - stableBand &&
+                        currentWz < dynamicCenter + stableBand)
+                    {
+                        stableCounter++;
+                        Debug.Log("Counter="+stableCounter);
+                        if (stableCounter >= stableSamplesNeeded)
+                        {
+                            currentThrowState = ThrowState.IN_FLIGHT;
+                            Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3} (center={dynamicCenter:F2})");
+                        }
+                    }
+                    else
+                    {
+                        // Not in the band => reset stableCounter
+                        stableCounter = 0;
+
+                        Debug.Log(Mathf.Abs(currentWz));
+
+                    }
+                    break;
+
+                case ThrowState.IN_FLIGHT:
+                    Debug.Log("IN FLIGHT");
+                    //TempTextStatus("IN FLIGHT");
+                    // If rotation dips below nearZeroThreshold for enough frames, we're done
+                    if (Mathf.Abs(currentWz) < nearZeroThreshold)
+                    {
+                        nearZeroCounter++;
+                        if (nearZeroCounter >= nearZeroSamplesNeeded)
+                        {
+                            currentThrowState = ThrowState.DONE;
+                            flightEndTime = estimatedTimestamp;
+                            Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
+                        }
+                    }
+                    else
+                    {
+                        nearZeroCounter = 0;
+                    }
+                    break;
+
+                case ThrowState.DONE:
+
+                    ThrowData throwData = new ThrowData(throwTimestamp, estimatedTimestamp - throwTimestamp, actualThrow);
+                    isDetectingThrow = false;
+                    //TempTextStatus($"Timestamp={estimatedTimestamp:F3},\n ax={actualThrow["ax"]:F3},\n " +
+                    //  $"ay={actualThrow["ay"]:F3},\n az={actualThrow["az"]:F3}, \n" +
+                    //  $"Roll={actualThrow["roll"]:F3},\n Pitch={actualThrow["pitch"]:F3},\n Yaw={actualThrow["yaw"]:F3}\n" +
+                    //    $"wx={actualThrow["wx"]:F3};\n wy= {actualThrow["wy"]:F3};\n wz= {actualThrow["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
+                    OnThrowDetected(throwData);
+                    break;
+            }
 
 
 
             Debug.Log($"Timestamp={estimatedTimestamp:F3} ,\n ax={lastData["ax"]:F3}, \n" +
                       $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3},\n " +
-                      $"Roll={lastData["Roll"]:F3}, Pitch={lastData["Pitch"]:F3}, Yaw={lastData["Yaw"]:F3}" +
+                      $"Roll={lastData["roll"]:F3}, Pitch={lastData["pitch"]:F3}, Yaw={lastData["yaw"]:F3}" +
                     $"wx={lastData["wx"]:F3}; wy= {lastData["wy"]:F3}; wz= {lastData["wz"]:F3};");
 
             UpdateConnectionStatus($"Timestamp={estimatedTimestamp:F3},\n ax={lastData["ax"]:F3},\n " +
                       $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3}, \n" +
-                      $"Roll={lastData["Roll"]:F3},\n Pitch={lastData["Pitch"]:F3},\n Yaw={lastData["Yaw"]:F3}\n" +
+                      $"Roll={lastData["roll"]:F3},\n Pitch={lastData["pitch"]:F3},\n Yaw={lastData["yaw"]:F3}\n" +
                         $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
 
         }             
@@ -194,9 +340,9 @@ public class SensorBluetooth : MonoBehaviour
             ["wy"] = (wy / 32768.0) * 2000.0,
             ["wz"] = (wz / 32768.0) * 2000.0,
 
-            ["Roll"] = (roll / 32768.0) * 180.0,
-            ["Pitch"] = (pitch / 32768.0) * 180.0,
-            ["Yaw"] = (yaw / 32768.0) * 180.0
+            ["roll"] = (roll / 32768.0) * 180.0,
+            ["pitch"] = (pitch / 32768.0) * 180.0,
+            ["yaw"] = (yaw / 32768.0) * 180.0
         };
 
 
@@ -214,6 +360,14 @@ public class SensorBluetooth : MonoBehaviour
             connectionStatusText.text = status;
         }
     }
+
+    //private void TempTextStatus(string status)
+    //{
+    //    if (tempText != null)
+    //    {
+    //        tempText.text = status;
+    //    }
+    //}
 
     void OnDestroy()
     {
