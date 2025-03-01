@@ -15,18 +15,18 @@ public class DiscThrowSimulation : MonoBehaviour
 
 
 
-    public float simulationTime = 60f; // seconds
+    public float simulationTime = 6f; // seconds
     public float dt = 0.01f;          // time step in seconds
     private List<DiscState> trajectory;
     private DiscGolfDisc disc;
-    //public Vector3 initialVelocity;
-    //public Vector3 initialPosition = new Vector3(0f, 0f, 1.5f);
-    //public Vector3 initialAttitude;
+    public Vector3 initialVelocity;
+    public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
+    public Vector3 initialAttitude;
     //public float spinrate;
 
-    public Vector3 initialVelocity = new Vector3(23.2f, 0f, 6.2f);
-    public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
-    public Vector3 initialAttitude = new Vector3(15.5f, 21.8f, -31.6f); // (roll, pitch, yaw) in radians
+    //public Vector3 initialVelocity = new Vector3(23.2f, 0f, 6.2f);
+    //public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
+    //public Vector3 initialAttitude = new Vector3(15.5f, 21.8f, -31.6f); // (roll, pitch, yaw) in radians
     public float spinrate = 20f;
     //public float mass, diameter, I_xy, I_z, coefficient_drag, coefficient_lift, coefficient_mass; // disc constants
     public float mass = 0.175f;
@@ -62,7 +62,6 @@ public class DiscThrowSimulation : MonoBehaviour
     void SimulateThrow(ThrowData throwData)
     {
         currentThrow = throwData;
-        TempTextStatus($"Simulating throw...  {throwData.throwDictionary["ax"]}");
 
         initialAcceleration = new Vector3((float)throwData.throwDictionary["ax"], (float)throwData.throwDictionary["ay"], (float)throwData.throwDictionary["az"]);
         initialAngularVelocity = new Vector3((float)throwData.throwDictionary["wx"], (float)throwData.throwDictionary["wy"], (float)throwData.throwDictionary["wz"]);
@@ -72,9 +71,10 @@ public class DiscThrowSimulation : MonoBehaviour
         throwTimeDelta = throwData.throwTimeDelta;
 
         //initialVelocity = new Vector3(23.2f, 0f, 6.2f);
-        ////initialVelocity = new Vector3((float)throwData.throwDictionary["vx"], (float)throwData.throwDictionary["vy"], (float)throwData.throwDictionary["vz"]);
+        initialVelocity = new Vector3(MathF.Abs((float)throwData.throwDictionary["vx"]), (float)throwData.throwDictionary["vy"], (float)throwData.throwDictionary["vz"]);
         initialAttitude = new Vector3((float)throwData.throwDictionary["roll"], (float)throwData.throwDictionary["pitch"], (float)throwData.throwDictionary["yaw"]);
 
+        TempTextStatus($"Simulating throw...  {initialVelocity}");
 
         //spinrate = 20f;
         disc = new DiscGolfDisc(mass, diameter, I_xy, I_z, coefficient_drag, coefficient_lift, coefficient_mass, spinrate);
@@ -109,11 +109,13 @@ public class DiscThrowSimulation : MonoBehaviour
             DiscState s = trajectory[idx];
             // Convert coordinates: simulation uses (x, y, z) with z as elevation.
             // We want (x, y, z) with y as elevation, so swap y and z.
-            Vector3 loggedPoint = new Vector3(s.Position.z, s.Position.y, s.Position.x);
+            Vector3 loggedPoint = new Vector3(s.Position.x, s.Position.y, s.Position.z);
             logDataPoints.Add(loggedPoint);
             //UpdateConnectionStatus($"Simulating point {i + 1}/{sampleCount}: {loggedPoint}");
 
         }
+
+        UpdateConnectionStatus($"First point: {logDataPoints[0]}");
 
         OnThrowSimulated?.Invoke(logDataPoints);
 

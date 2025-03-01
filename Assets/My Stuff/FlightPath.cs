@@ -55,7 +55,7 @@ public class FlightPath : MonoBehaviour
             UpdateConnectionStatus($"Displaying point {i + 1}/{trajectoryPoints.Count}: {trajectoryPoints[i]}");
             trajectoryLine.SetPosition(i, trajectoryPoints[i]);
             discObject.position = trajectoryPoints[i];
-            yield return new WaitForSeconds(0.05f); // Adjust the delay to suit the desired speed
+            yield return new WaitForSeconds(0.01f); // Adjust the delay to suit the desired speed
         }
     }
 

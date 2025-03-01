@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using TMPro;
+using Unity.VisualScripting;
 using UnityEngine;
 //using static DiscThrowSimulation;
 
@@ -109,7 +110,7 @@ public class DiscGolfDisc : MonoBehaviour
         Vector3 F_aero_world = R.MultiplyPoint3x4(F_aero_body);
 
         // Gravity force in world frame.
-        Vector3 F_gravity = new Vector3(0, 0, -Mass * g);
+        Vector3 F_gravity = new Vector3(0, -Mass * g, 0);
 
         // Total acceleration.
         Vector3 acceleration = (F_aero_world + F_gravity) / Mass;
@@ -151,6 +152,7 @@ public class DiscGolfDisc : MonoBehaviour
         states.Add(initialState);
         DiscState current = initialState;
 
+
         FlightControllerStatus($"steps {steps}, current {current}");
 
         for (int i = 1; i < steps; i++)
@@ -166,7 +168,18 @@ public class DiscGolfDisc : MonoBehaviour
             if (current.Position.y <= 0)
                 break;
         }
+        Vector3 lastPosition = states[states.Count - 1].Position;
+        if (lastPosition.z > lastPosition.x)
+        {
+            for (int i = 0; i < states.Count; i++)
+            {
+                Vector3 pos = states[i].Position;
+                states[i].Position = new Vector3(pos.z, pos.y, pos.x);
+            }
+        }
+
         return states;
+
     }
     private void FlightControllerStatus(string status)
     {

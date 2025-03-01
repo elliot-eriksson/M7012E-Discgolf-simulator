@@ -20,62 +20,63 @@ public class SensorBluetooth : MonoBehaviour
 
     private bool isDetectingThrow = false; // Flag to control if we are detecting a throw
 
-    public TextMeshProUGUI connectionStatusText; 
+    public TextMeshProUGUI connectionStatusText;
     //public TextMeshProUGUI tempText; 
 
+    [SerializeField] private float stableDelay = 0.2f;                  //Delay range for stability check
+    [SerializeField] private float changeThreshold = 100f;              //Threshold for 
+    [SerializeField] private float throwThreshold = 600f;
+    [SerializeField] private int thresholdSamplesNeeded = 3;            //Amount of needed succesive datapoints
+    [SerializeField] private int stableSamplesNeeded = 3;               //Same as thersholdSamplesNeeded but for other case
+    [SerializeField] private float nearZeroThreshold = 150f;            //Find end of throw
+    [SerializeField] private int nearZeroSamplesNeeded = 2;             //Consecutive for end of throw
+
+    private float estimatedTimestamp = 0f;
+    private float timeSinceThrown = 0f;
+    private float dynamicCenter = 0f;                                   //Range in rotation for a throw
+    private float throwStartTime = -1f;
+    private float flightEndTime = -1f;
+
+    private int stableDeltaCounter = 0;                                 //Delta for center 
+    private int nearZeroCounter = 0;
+    private bool finalCenterSet = false;
+
+
+    private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }           //State machine for a throw or not
+    private ThrowState currentThrowState = ThrowState.IDLE;             //Starting value for state machine
+
+
+    private Vector3 velocity = Vector3.zero;         // integrated velocity
+    private Vector3 lastAcceleration = Vector3.zero; // acceleration from the previous frame
+    private bool isIntegratingVelocity = false;
+
+    private const int RING_BUFFER_CAPACITY = 30;
+    private List<FrameSample> ringBuffer = new List<FrameSample>(RING_BUFFER_CAPACITY);
 
     private Dictionary<string, double> lastData = null;
-    private Dictionary<string, double> actualThrow = null;
+    private Dictionary<string, double> actualData = null;
 
-    private Thread _readThread;
-    private float estimatedTimestamp = 0f;
-    private float updateInterval = 1f / 200f;
-
-    private float throwTimestamp = 0f;
-    private float maxWz = 0f;
-    private float throwDetectedTime = -1f;
-    private float endThrow = 0f;
-
-    private Vector3 velocity = Vector3.zero;
-
+    private struct FrameSample
+    {
+        public float time;
+        public float wz;
+    }
     public void StartNewThrowDetection()
     {
         // Start the throw detection process
         isDetectingThrow = true;
 
         lastData = null;
-        actualThrow = null;
+        actualData = null;
 
         // Reset throw-related variables
-        throwTimestamp = 0f;
-        maxWz = 0f;
-        throwDetectedTime = -1f;
-        endThrow = 0f;
+        //throwTimestamp = 0f;
+        //maxWz = 0f;
+        //throwDetectedTime = -1f;
+        //endThrow = 0f;
         velocity = Vector3.zero;
     }
 
-
-    // Step 1: Throw detection states
-    private enum ThrowState { IDLE, THROWN, IN_FLIGHT, DONE }
-    private ThrowState currentThrowState = ThrowState.IDLE;
-
-    [SerializeField] private float throwThreshold = 600f;       // For crossing from IDLE -> THROWN
-    [SerializeField] private int thresholdSamplesNeeded = 6;   // # of consecutive frames above throwThreshold
-
-    // We'll capture the rotation at the moment of throw
-    private float dynamicCenter = 0f;
-
-    // Used once we're in THROWN
-    [SerializeField] private float stableBand = 100f;
-    [SerializeField] private float stableRotationCenter = -1400f;
-    [SerializeField] private float stableRotationBand = 60f;
-    [SerializeField] private int stableSamplesNeeded = 6;
-    private int stableCounter = 0;
-
-    // Used once we're in IN_FLIGHT
-    [SerializeField] private float nearZeroThreshold = 100f;
-    [SerializeField] private int nearZeroSamplesNeeded = 5;
-    private int nearZeroCounter = 0;
 
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;
@@ -84,22 +85,6 @@ public class SensorBluetooth : MonoBehaviour
     private ulong sensorAddress = 0xC9_65_16_F6_7A_25; //Disc sensorn
 
 
-    private float throwStartTime = -1f;
-    private float flightEndTime = -1f;
-
-    // --------------------------------------------------------------------------------
-    // RING BUFFER to track recent samples (time + wz) so we can retroactively find
-    // the start of the throw when we confirm thresholdSamplesNeeded consecutive frames.
-    // --------------------------------------------------------------------------------
-    private struct FrameSample
-    {
-        public float time;
-        public float wz;
-    }
-
-    // You can store more frames if you want (e.g. 30-60) so you have some history
-    private const int RING_BUFFER_CAPACITY = 30;
-    private List<FrameSample> ringBuffer = new List<FrameSample>(RING_BUFFER_CAPACITY);
 
 
     void Start()
@@ -114,147 +99,168 @@ public class SensorBluetooth : MonoBehaviour
 
     void Update()
     {
-
-        if (isDetectingThrow && lastData != null)
+        if (lastData != null && isDetectingThrow)
         {
+            estimatedTimestamp += Time.deltaTime;
+            float currentWz = (float)lastData["wz"];
 
-            estimatedTimestamp += Time.deltaTime; // Track time
 
-            float currentWz = (float)lastData["wz"]; // Current Z-axis rotation speed
+            float ax = (float)lastData["ax"]; // m/s^2
+            float ay = (float)lastData["ay"];
+            float az = (float)lastData["az"];
 
-            // Check if this is the highest rotation speed we've seen
-            if (Mathf.Abs(currentWz) > Mathf.Abs(maxWz))
+            float rollDeg = (float)lastData["roll"];
+            float pitchDeg = (float)lastData["pitch"];
+            float yawDeg = (float)lastData["yaw"];
+
+            Vector3 currentAcceleration = new Vector3(ax, ay, az);
+
+            //Ingeration of acceleration to get velocity
+            if (isIntegratingVelocity)
             {
-                maxWz = currentWz;
-                throwTimestamp = estimatedTimestamp; // Store when max rotation occurs
-                actualThrow = lastData;
+                Quaternion sensorToWorld = Quaternion.Euler(pitchDeg, yawDeg, rollDeg);
+
+                // Local acceleration vector
+                Vector3 accelLocal = new Vector3(ax, ay, az);
+
+                // Rotate to world frame
+                Vector3 accelWorld = sensorToWorld * accelLocal;
+                //accelWorld.y -= 9.81f;
+                
+
+                // Integrate
+                float dt = Time.deltaTime;
+                velocity += accelWorld * dt;
+            
+                lastData["vx"] = velocity.x;
+                lastData["vy"] = -velocity.y;
+                lastData["vz"] = velocity.z;
+                actualData = lastData;
             }
 
+            float speed = velocity.magnitude;
 
-
+            // Add current sample to ringBuffer
             FrameSample sample = new FrameSample { time = estimatedTimestamp, wz = currentWz };
             ringBuffer.Add(sample);
             if (ringBuffer.Count > RING_BUFFER_CAPACITY)
-            {
                 ringBuffer.RemoveAt(0);
-            }
-
 
             switch (currentThrowState)
             {
                 case ThrowState.IDLE:
                     {
-                        // We look at the end of the ringBuffer to see how many consecutive samples 
-                        // are above the throwThreshold, going backwards from the newest sample.
+                        // Count how many consecutive frames from the end are above throwThreshold
                         int consecutiveCount = 0;
                         for (int i = ringBuffer.Count - 1; i >= 0; i--)
                         {
-                            float wzVal = ringBuffer[i].wz;
-                            if (Mathf.Abs(wzVal) >= throwThreshold)
-                            {
+                            if (Mathf.Abs(ringBuffer[i].wz) >= throwThreshold)
                                 consecutiveCount++;
-                            }
                             else
-                            {
-                                // As soon as we find one sample below threshold, stop counting.
                                 break;
-                            }
                         }
-
-                        // If we found enough consecutive frames at the end of the buffer:
                         if (consecutiveCount >= thresholdSamplesNeeded)
                         {
-                            // 1) Transition to THROWN
                             currentThrowState = ThrowState.THROWN;
-                            
+                            timeSinceThrown = 0f;        
+                            finalCenterSet = false;
 
-                            // 2) The earliest sample of that run is:
+                            velocity = Vector3.zero;
+                            isIntegratingVelocity = true;   // begin integration
+
+
                             int earliestIndex = ringBuffer.Count - consecutiveCount;
-                            float realStartTime = ringBuffer[earliestIndex].time;
-                            throwStartTime = realStartTime;
-
-                            // 3) Pick a dynamicCenter. 
-                            // For example, use the last sample's rotation (the newest sample).
-                            // Or compute an average of those consecutive frames for a smoother center.
-                            float lastWz = ringBuffer[ringBuffer.Count - 1].wz;
-                            dynamicCenter = lastWz;
-
-                            Debug.Log($"[STATE] Throw detected! Real start time = {throwStartTime:F3}, dynamicCenter={dynamicCenter:F2}");
+                            throwStartTime = ringBuffer[earliestIndex].time;
+                            dynamicCenter = ringBuffer[ringBuffer.Count - 1].wz;
+                            Debug.Log($"[STATE] Throw DETECTED at {throwStartTime:F3}, temporaryCenter={dynamicCenter:F2}");
                         }
                     }
                     break;
 
-
                 case ThrowState.THROWN:
-                    //Debug.Log("THROWN");
-                    //TempTextStatus("THROWN");
-                    // If current rotation is close to dynamicCenter, increment stableCounter
-                    if (currentWz > dynamicCenter - stableBand &&
-                        currentWz < dynamicCenter + stableBand)
                     {
-                        stableCounter++;
-                        Debug.Log("Counter="+stableCounter);
-                        if (stableCounter >= stableSamplesNeeded)
+                        //actualData = lastData;
+                        timeSinceThrown += Time.deltaTime;
+
+                        // If we haven't set our final center yet and the stableDelay has passed,
+                        // compute dynamicCenter from the last few frames
+                        if (!finalCenterSet && timeSinceThrown >= stableDelay)
                         {
-                            currentThrowState = ThrowState.IN_FLIGHT;
-                            Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3} (center={dynamicCenter:F2})");
+                            finalCenterSet = true;  
+                            int framesToAvg = Mathf.Min(5, ringBuffer.Count);
+                            float sum = 0f;
+
+                            for (int i = ringBuffer.Count - framesToAvg; i < ringBuffer.Count; i++)
+                                sum += ringBuffer[i].wz;
+                            dynamicCenter = sum / framesToAvg;
+                            Debug.Log($"[THROWN] Final center set to {dynamicCenter:F2} after delay");
                         }
-                    }
-                    else
-                    {
-                        // Not in the band => reset stableCounter
-                        stableCounter = 0;
 
-                        Debug.Log(Mathf.Abs(currentWz));
+                        if (finalCenterSet && ringBuffer.Count > 1)
+                        {
+                            // Compare the last 2 frames
+                            float wzCurr = ringBuffer[ringBuffer.Count - 1].wz;
+                            float wzPrev = ringBuffer[ringBuffer.Count - 2].wz;
+                            float delta = Mathf.Abs(wzCurr - wzPrev);
 
+                            if (delta < changeThreshold)
+                            {
+                                stableDeltaCounter++;
+                            }
+                            else
+                            {
+                                stableDeltaCounter = 0;
+                            }
+
+                            if (stableDeltaCounter >= stableSamplesNeeded)
+                            {
+                                currentThrowState = ThrowState.IN_FLIGHT;
+                                Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3}, center~{dynamicCenter:F2}");
+                            }
+                        }
                     }
                     break;
 
                 case ThrowState.IN_FLIGHT:
-                    Debug.Log("IN FLIGHT");
-                    //TempTextStatus("IN FLIGHT");
-                    // If rotation dips below nearZeroThreshold for enough frames, we're done
-                    if (Mathf.Abs(currentWz) < nearZeroThreshold)
                     {
-                        nearZeroCounter++;
-                        if (nearZeroCounter >= nearZeroSamplesNeeded)
+                        // If rotation dips below nearZeroThreshold for enough frames, we're done
+                        float absWz = Mathf.Abs(currentWz);
+                        if (absWz < nearZeroThreshold)
                         {
-                            currentThrowState = ThrowState.DONE;
-                            flightEndTime = estimatedTimestamp;
-                            Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
+                            nearZeroCounter++;
+                            if (nearZeroCounter >= nearZeroSamplesNeeded)
+                            {
+                                currentThrowState = ThrowState.DONE;
+                                flightEndTime = estimatedTimestamp;
+                                Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
+                            }
                         }
-                    }
-                    else
-                    {
-                        nearZeroCounter = 0;
+                        else
+                        {
+                            nearZeroCounter = 0;
+                        }
                     }
                     break;
 
                 case ThrowState.DONE:
 
-                    ThrowData throwData = new ThrowData(throwTimestamp, estimatedTimestamp - throwTimestamp, actualThrow);
-                    isDetectingThrow = false;
-                    //TempTextStatus($"Timestamp={estimatedTimestamp:F3},\n ax={actualThrow["ax"]:F3},\n " +
-                    //  $"ay={actualThrow["ay"]:F3},\n az={actualThrow["az"]:F3}, \n" +
-                    //  $"Roll={actualThrow["roll"]:F3},\n Pitch={actualThrow["pitch"]:F3},\n Yaw={actualThrow["yaw"]:F3}\n" +
-                    //    $"wx={actualThrow["wx"]:F3};\n wy= {actualThrow["wy"]:F3};\n wz= {actualThrow["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
-                    OnThrowDetected(throwData);
-                    break;
-            }
-
-
-
-            Debug.Log($"Timestamp={estimatedTimestamp:F3} ,\n ax={lastData["ax"]:F3}, \n" +
-                      $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3},\n " +
-                      $"Roll={lastData["roll"]:F3}, Pitch={lastData["pitch"]:F3}, Yaw={lastData["yaw"]:F3}" +
-                    $"wx={lastData["wx"]:F3}; wy= {lastData["wy"]:F3}; wz= {lastData["wz"]:F3};");
+                        ThrowData throwData = new ThrowData(estimatedTimestamp, timeSinceThrown, actualData);
+                        isDetectingThrow = false;
+                        isIntegratingVelocity = false;
+                        //TempTextStatus($"Timestamp={estimatedTimestamp:F3},\n ax={actualThrow["ax"]:F3},\n " +
+                        //  $"ay={actualThrow["ay"]:F3},\n az={actualThrow["az"]:F3}, \n" +
+                        //  $"Roll={actualThrow["roll"]:F3},\n Pitch={actualThrow["pitch"]:F3},\n Yaw={actualThrow["yaw"]:F3}\n" +
+                        //    $"wx={actualThrow["wx"]:F3};\n wy= {actualThrow["wy"]:F3};\n wz= {actualThrow["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
+                        OnThrowDetected(throwData);
+                        break;
+                }
+            } 
 
             UpdateConnectionStatus($"Timestamp={estimatedTimestamp:F3},\n ax={lastData["ax"]:F3},\n " +
-                      $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3}, \n" +
-                      $"Roll={lastData["roll"]:F3},\n Pitch={lastData["pitch"]:F3},\n Yaw={lastData["yaw"]:F3}\n" +
-                        $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
+            $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3}, \n" +
+            $"Roll={lastData["roll"]:F3},\n Pitch={lastData["pitch"]:F3},\n Yaw={lastData["yaw"]:F3}\n" +
+            $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3},\n ");
 
-        }             
     }
 
     private async void ConnectToDevice(ulong address)
@@ -371,7 +377,7 @@ public class SensorBluetooth : MonoBehaviour
 
     void OnDestroy()
     {
-        Debug.Log($"Throw detected at {throwTimestamp:F3} seconds");
+        //Debug.Log($"Throw detected at {throwTimestamp:F3} seconds");
 
         if (device != null)
         {
