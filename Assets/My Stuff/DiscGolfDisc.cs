@@ -168,15 +168,15 @@ public class DiscGolfDisc : MonoBehaviour
             if (current.Position.y <= 0)
                 break;
         }
-        Vector3 lastPosition = states[states.Count - 1].Position;
-        if (lastPosition.z > lastPosition.x)
-        {
-            for (int i = 0; i < states.Count; i++)
-            {
-                Vector3 pos = states[i].Position;
-                states[i].Position = new Vector3(pos.z, pos.y, pos.x);
-            }
-        }
+        //Vector3 lastPosition = states[states.Count - 1].Position;
+        //if (lastPosition.z > lastPosition.x)
+        //{
+        //    for (int i = 0; i < states.Count; i++)
+        //    {
+        //        Vector3 pos = states[i].Position;
+        //        states[i].Position = new Vector3(pos.z, pos.y, pos.x);
+        //    }
+        //}
 
         return states;
 

@@ -48,14 +48,18 @@ public class FlightPath : MonoBehaviour
     private IEnumerator DisplayTrajectoryGradually(List<Vector3> trajectoryPoints)
     {
         trajectoryLine.positionCount = trajectoryPoints.Count;
-
+        float waitTime = 0.05f;
+        if (trajectoryPoints.Count > 100)
+        {
+            waitTime = 5/ trajectoryPoints.Count; // Adjust the total time to display the trajectory
+        }
         // Gradually set each position with a small delay
         for (int i = 0; i < trajectoryPoints.Count; i++)
         {
             UpdateConnectionStatus($"Displaying point {i + 1}/{trajectoryPoints.Count}: {trajectoryPoints[i]}");
             trajectoryLine.SetPosition(i, trajectoryPoints[i]);
             discObject.position = trajectoryPoints[i];
-            yield return new WaitForSeconds(0.01f); // Adjust the delay to suit the desired speed
+            yield return new WaitForSeconds(waitTime); // Adjust the delay to suit the desired speed
         }
     }
 
