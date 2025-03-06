@@ -260,11 +260,7 @@ public class SensorBluetooth : MonoBehaviour
                         ThrowData throwData = new ThrowData(estimatedTimestamp, timeSinceThrown, actualData);
                         isDetectingThrow = false;
                         isIntegratingVelocity = false;
-                        //TempTextStatus($"Timestamp={estimatedTimestamp:F3},\n ax={actualThrow["ax"]:F3},\n " +
-                        //  $"ay={actualThrow["ay"]:F3},\n az={actualThrow["az"]:F3}, \n" +
-                        //  $"Roll={actualThrow["roll"]:F3},\n Pitch={actualThrow["pitch"]:F3},\n Yaw={actualThrow["yaw"]:F3}\n" +
-                        //    $"wx={actualThrow["wx"]:F3};\n wy= {actualThrow["wy"]:F3};\n wz= {actualThrow["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
-                        OnThrowDetected(throwData);
+                        OnThrowDetected?.Invoke(throwData);
                         break;
                 }
             } 
