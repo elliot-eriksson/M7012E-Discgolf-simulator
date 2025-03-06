@@ -57,13 +57,8 @@ public class SensorBluetooth : MonoBehaviour
     private Dictionary<string, double> lastData = null;
     private Dictionary<string, double> actualData = null;
 
-    private Dictionary<string, double> firstData = null;
-    private Dictionary<string, double> secondData = null;
 
-    private Dictionary<string, double> maxData = null;
 
-    private float lastTime = 0f;
-    private float throwTime = 0f;
 
 
     private struct FrameSample
@@ -93,12 +88,6 @@ public class SensorBluetooth : MonoBehaviour
         stableDeltaCounter = 0;
         nearZeroCounter = 0;
 
-        firstData = null;
-        secondData = null;
-        lastTime = 0f;
-        throwTime = 0f;
-
-        maxData = null;
 
     }
 
@@ -139,77 +128,42 @@ public class SensorBluetooth : MonoBehaviour
             float pitchDeg = (float)lastData["pitch"];
             float yawDeg = (float)lastData["yaw"];
 
-            // Integration of acceleration to get velocity
-            if (isIntegratingVelocity && secondData != null && actualData == null)
+             //Integration of acceleration to get velocity
+        if (isIntegratingVelocity)
+        {
+            Quaternion sensorToWorld = Quaternion.Euler(pitchDeg, yawDeg, rollDeg);
+
+            // Local acceleration vector
+            Vector3 accelLocal = new Vector3(ax, ay, az-9.81f);
+
+            // Rotate to world frame
+            Vector3 accelWorld = sensorToWorld * accelLocal;
+            //accelWorld.y -= 9.81f;
+
+            // Integrate
+            float dt = Time.deltaTime;
+            velocity += accelWorld * dt;
+            if (Mathf.Abs((float)velocity.z) > Mathf.Abs((float)velocity.x))
+            {    
+                lastData["vx"] = velocity.z;
+            } 
+            else
             {
-                float Fax = (float)firstData["ax"];
-                float Fay = (float)firstData["ay"];
-                float Faz = (float)firstData["az"];
-                Vector3 firstAccel = new Vector3(Fax, Fay, Faz);
-
-                //float Sax = (float)secondData["ax"];
-                //float Say = (float)secondData["ay"];
-                //float Saz = (float)secondData["az"];
-
-                //float dt = throwTime - lastTime;
-                float dt = 0.2f;
-
-                Quaternion firstToWorld = Quaternion.Euler((float)firstData["roll"], (float)firstData["pitch"], (float)firstData["yaw"]);
-                //Quaternion secondToWorld = Quaternion.Euler((float)secondData["roll"], (float)secondData["pitch"], (float)secondData["yaw"]);
-                Quaternion largeToWorld = Quaternion.Euler((float)maxData["roll"], (float)maxData["pitch"], (float)maxData["yaw"]);
-                rollDeg = (float)maxData["roll"];
-                pitchDeg = (float)maxData["pitch"];
-                yawDeg = (float)maxData["yaw"];
-
-                Vector3 firstWorld= firstToWorld * new Vector3(Fax, Fay, Faz);
-                //Vector3 secondAccel = secondToWorld * new Vector3(Sax, Say, Saz);
-                Vector3 tempAcc = new Vector3((float)maxData["ax"], (float)maxData["ay"], (float)maxData["az"]);
-                Vector3 largeAccel = largeToWorld * tempAcc;
-                //firstAccel.z = 0f;
-                //secondAccel.z = 0f;
-                //largeAccel.z = 0f;
-
-                //velocity = (firstAccel + secondAccel) * dt / 2f;
-                //velocity = firstAccel * dt;
-                //velocity = new Vector3(30, 8, 10) * dt;
-                velocity = largeAccel * dt;
-                velocity = new Vector3(velocity.z, velocity.y, velocity.x);
-                TempTextStatus($"Acceleration {tempAcc},{firstAccel}, \n WorldAcc {largeAccel},{firstWorld}, \n Velocity {velocity}");
-
-
-                //// Convert Euler angles to quaternion (Verify order based on WT9011DCL docs)
-                //Quaternion sensorToWorld = Quaternion.Euler(rollDeg, pitchDeg, yawDeg); 
-
-                //// Rotate acceleration into the world frame
-                //Vector3 accelLocal = new Vector3(ay, ax, az);
-                //Vector3 accelWorld = sensorToWorld * accelLocal;
-                //accelWorld.z = 0f;
-
-                //// Subtract gravity (assuming Y is up in world frame)
-                ////Vector3 newAccelWorld -= new Vector3(0, 9.81f, 0);
-
-                //// Integrate acceleration to get velocity
-                //float dt = Time.deltaTime;
-                //Vector3 currAccel = accelWorld * dt;
-                //if (currAccel.magnitude < 0.05f) currAccel = Vector3.zero;
-                //velocity += currAccel;
-
-                // Apply simple drift correction (Zero-Velocity Update - optional)
-                //if (velocity.magnitude < 0.1f) velocity = Vector3.zero;
-                //TempTextStatus($"Local {accelLocal}, {, \n world {accelWorld}, \n Velocity {velocity}");
-
-                // Store velocity in the lastData dictionary
-
-                lastData["pitch"] = pitchDeg;
-                lastData["roll"] = rollDeg;
-                lastData["yaw"] = yawDeg;
-
                 lastData["vx"] = velocity.x;
-                lastData["vy"] = velocity.y; 
-                lastData["vz"] = velocity.z;
-                actualData = lastData;
             }
-        
+
+            
+            lastData["vy"] = -velocity.y;
+            lastData["vz"] = 0f;
+
+
+
+            TempTextStatus($"Acceleration {accelLocal}, \n WorldAcc {accelWorld}, \n Velocity {velocity}");
+
+            actualData = lastData;
+        }
+
+
 
 
             float speed = velocity.magnitude;
@@ -225,8 +179,6 @@ public class SensorBluetooth : MonoBehaviour
             {
                 case ThrowState.IDLE:
                     {
-                        firstData = null;
-                        secondData = null;
                         // Count how many consecutive frames from the end are above throwThreshold
                         int consecutiveCount = 0;
                         for (int i = ringBuffer.Count - 1; i >= 0; i--)
@@ -234,14 +186,6 @@ public class SensorBluetooth : MonoBehaviour
                             if (Mathf.Abs(ringBuffer[i].wz) >= throwThreshold)
                             {
                                 consecutiveCount++;
-                                if (maxData == null)
-                                {
-                                    maxData = lastData;
-                                }
-                                else if (Mathf.Abs((float)maxData["ax"]) < Mathf.Abs((float)lastData["ax"]))
-                                {
-                                    maxData = lastData;
-                                }
                             }
                             else
                                 break;
@@ -260,30 +204,13 @@ public class SensorBluetooth : MonoBehaviour
                             throwStartTime = ringBuffer[earliestIndex].time;
                             dynamicCenter = ringBuffer[ringBuffer.Count - 1].wz;
                             Debug.Log($"[STATE] Throw DETECTED at {throwStartTime:F3}, temporaryCenter={dynamicCenter:F2}");
-                            throwTime = estimatedTimestamp;
-                            firstData = lastData;
-                            if (Mathf.Abs((float)maxData["ax"]) < Mathf.Abs((float)lastData["ax"]))
-                            {
-                                maxData = lastData;
-                            }
-
                         }
                     }
                     break;
 
                 case ThrowState.THROWN:
                     {
-                        //actualData = lastData;
                         timeSinceThrown += Time.deltaTime;
-                        if (secondData == null)
-                        {
-                            lastTime = timeSinceThrown;
-                            secondData = lastData;
-                        }
-                        if (Mathf.Abs((float)maxData["ax"]) < Mathf.Abs((float)lastData["ax"]))
-                        {
-                            maxData = lastData;
-                        }
 
                         // If we haven't set our final center yet and the stableDelay has passed,
                         // compute dynamicCenter from the last few frames
@@ -328,10 +255,6 @@ public class SensorBluetooth : MonoBehaviour
                 case ThrowState.IN_FLIGHT:
                     {
                         // If rotation dips below nearZeroThreshold for enough frames, we're done
-                        if (Mathf.Abs((float)maxData["ax"]) < Mathf.Abs((float)lastData["ax"]))
-                        {
-                            maxData = lastData;
-                        }
 
                         float absWz = Mathf.Abs(currentWz);
                         if (absWz < nearZeroThreshold)
@@ -356,11 +279,6 @@ public class SensorBluetooth : MonoBehaviour
                         ThrowData throwData = new ThrowData(estimatedTimestamp, timeSinceThrown, actualData);
                         isDetectingThrow = false;
                         isIntegratingVelocity = false;
-                        //TempTextStatus($"Timestamp={estimatedTimestamp:F3},\n ax={actualThrow["ax"]:F3},\n " +
-                        //  $"ay={actualThrow["ay"]:F3},\n az={actualThrow["az"]:F3}, \n" +
-                        //  $"Roll={actualThrow["roll"]:F3},\n Pitch={actualThrow["pitch"]:F3},\n Yaw={actualThrow["yaw"]:F3}\n" +
-                        //    $"wx={actualThrow["wx"]:F3};\n wy= {actualThrow["wy"]:F3};\n wz= {actualThrow["wz"]:F3},\n Throw Time={throwTimestamp:F3}");
-                        //OnThrowDetected(throwData);
                         OnThrowDetected?.Invoke(throwData);
                         break;
                 }

@@ -1428,7 +1428,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   simulationText: {fileID: 156784253}
   tempText: {fileID: 65284395}
-  simulationTime: 60
+  simulationTime: 6
   dt: 0.01
   initialVelocity: {x: 0, y: 0, z: 0}
   initialPosition: {x: 0, y: 1.5, z: 0}

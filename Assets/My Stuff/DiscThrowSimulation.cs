@@ -27,7 +27,8 @@ public class DiscThrowSimulation : MonoBehaviour
     //public Vector3 initialVelocity = new Vector3(23.2f, 0f, 6.2f);
     //public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
     //public Vector3 initialAttitude = new Vector3(15.5f, 21.8f, -31.6f); // (roll, pitch, yaw) in radians
-    public float spinrate = 20f;
+    //public float spinrate = 20f;
+    public float spinrate;
     //public float mass, diameter, I_xy, I_z, coefficient_drag, coefficient_lift, coefficient_mass; // disc constants
     public float mass = 0.175f;
     public float diameter = 0.205f;
