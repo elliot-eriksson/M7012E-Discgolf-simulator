@@ -59,7 +59,22 @@ public class FlightPath : MonoBehaviour
         }
     }
 
-    // Method to start/replay the flight path
+    //// Method to start/replay the flight path
+    //public void ReplayFlightPath()
+    //{
+    //    if (replayDataPoints.Count == 0)
+    //    {
+    //        Debug.LogWarning("No flight path data available to replay!");
+    //        return;
+    //    }
+    //    UpdateConnectionStatus("Replaying flight path...");
+    //    // Reset the replay index
+    //    currentReplayIndex = 0;
+
+    //    // Start a coroutine to replay the path over time
+    //    StartCoroutine(ReplayCoroutine());
+    //}
+
     public void ReplayFlightPath()
     {
         if (replayDataPoints.Count == 0)
@@ -68,27 +83,70 @@ public class FlightPath : MonoBehaviour
             return;
         }
 
-        // Reset the replay index
-        currentReplayIndex = 0;
+        // 1) Clear the existing line
+        trajectoryLine.positionCount = 0;
 
-        // Start a coroutine to replay the path over time
+        // 2) (Optional) move the disc to the starting point
+        discObject.position = replayDataPoints[0];
+
+        // 3) Reset our replay index
+        currentReplayIndex = 0;
+        UpdateConnectionStatus("Replaying flight path...");
+
+        // 4) Start the coroutine to show the line incrementally
         StartCoroutine(ReplayCoroutine());
     }
 
+
+    public void resetPosition()
+    {
+        discObject.position = new Vector3(0f, 1.5f, 0f);
+        trajectoryLine.positionCount = 0;
+        replayDataPoints.Clear();
+
+        Debug.Log("SADASDSAD");
+    }
+
     // Coroutine to handle the replay of the flight path
+    //private IEnumerator ReplayCoroutine()
+    //{
+    //    isReplaying = true;
+    //    trajectoryLine.positionCount = replayDataPoints.Count;
+
+    //    UpdateConnectionStatus("Replaying Corotine");
+
+    //    while (currentReplayIndex < replayDataPoints.Count)
+    //    {
+    //        // Set the current position for the LineRenderer
+    //        trajectoryLine.SetPosition(currentReplayIndex, replayDataPoints[currentReplayIndex]);
+    //        UpdateConnectionStatus(" trajectoryLine " + trajectoryLine);
+
+    //        // Wait for a short period before moving to the next point in the trajectory
+    //        currentReplayIndex++;
+    //        yield return new WaitForSeconds(0.05f); // Adjust the delay for replay speed
+    //    }
+
+    //    isReplaying = false;
+    //}
+
     private IEnumerator ReplayCoroutine()
     {
         isReplaying = true;
         trajectoryLine.positionCount = replayDataPoints.Count;
-
+        // Go through each point in replayDataPoints
         while (currentReplayIndex < replayDataPoints.Count)
         {
-            // Set the current position for the LineRenderer
+            // Increase the total points on the line by 1
+            trajectoryLine.positionCount = currentReplayIndex + 1;
+
+            // Set the next position on the line
             trajectoryLine.SetPosition(currentReplayIndex, replayDataPoints[currentReplayIndex]);
 
-            // Wait for a short period before moving to the next point in the trajectory
+            // Also move the disc to that position
+            discObject.position = replayDataPoints[currentReplayIndex];
+
             currentReplayIndex++;
-            yield return new WaitForSeconds(0.05f); // Adjust the delay for replay speed
+            yield return new WaitForSeconds(0.05f); // Adjust speed as desired
         }
 
         isReplaying = false;

@@ -83,8 +83,12 @@ public class DiscThrowSimulation : MonoBehaviour
         RunSimulation();
 
     }    
+    public void simRunCallsPrivateRunSim()
+    {
 
-
+        RunSimulation();
+    }
+    //GJORDE DENNA PUBLIC MEN VAR PRIVATE
     private void RunSimulation()
     {
         //TempTextStatus($"Simulating throw...  {initialPosition}");

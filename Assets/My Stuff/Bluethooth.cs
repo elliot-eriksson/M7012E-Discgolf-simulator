@@ -68,15 +68,28 @@ public class SensorBluetooth : MonoBehaviour
 
         lastData = null;
         actualData = null;
-
-        // Reset throw-related variables
-        //throwTimestamp = 0f;
-        //maxWz = 0f;
-        //throwDetectedTime = -1f;
-        //endThrow = 0f;
+        estimatedTimestamp = 0f;
+        timeSinceThrown = 0f;
+        dynamicCenter = 0f;
+        throwStartTime = -1f;
+        flightEndTime = -1f;
+        stableDeltaCounter = 0;
+        nearZeroCounter = 0;
+        finalCenterSet = false;
         velocity = Vector3.zero;
+        ringBuffer.Clear();
+        isIntegratingVelocity = false;
+
+
+
+
+        currentThrowState = ThrowState.IDLE;
+
+        Debug.Log("Du kom in i StartNewThrow");
     }
 
+
+    
 
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;

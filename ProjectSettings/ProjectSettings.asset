@@ -12,7 +12,7 @@ PlayerSettings:
   targetDevice: 2
   useOnDemandResources: 0
   accelerometerFrequency: 60
-  companyName: DefaultCompany
+  companyName: DiscGolfSimulator
   productName: DiscGolfSimulator
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
@@ -293,7 +293,7 @@ PlayerSettings:
   - m_BuildTarget: 
     m_Icons:
     - serializedVersion: 2
-      m_Icon: {fileID: 2800000, guid: e6f2c743f802ea44ab20fc856e9ed337, type: 3}
+      m_Icon: {fileID: 0}
       m_Width: 128
       m_Height: 128
       m_Kind: 0
@@ -695,14 +695,14 @@ PlayerSettings:
   apiCompatibilityLevelPerPlatform: {}
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: Menu
+  metroPackageName: DiscGolfSimulator
   metroPackageVersion: 1.0.0.0
   metroCertificatePath: Assets/WSATestCertificate.pfx
   metroCertificatePassword: 
   metroCertificateSubject: DefaultCompany
   metroCertificateIssuer: DefaultCompany
   metroCertificateNotAfter: 00093505dc9ddc01
-  metroApplicationDescription: Menu
+  metroApplicationDescription: frisbee
   wsaImages: {}
   metroTileShortName: Menu
   metroTileShowName: 0
@@ -720,7 +720,7 @@ PlayerSettings:
   platformCapabilities:
     WindowsStoreApps:
       GazeInput: True
-      Bluetooth: False
+      Bluetooth: True
       PrivateNetworkClientServer: True
       InternetClientServer: True
       SpatialPerception: True
