@@ -71,7 +71,7 @@ public class DiscThrowSimulation : MonoBehaviour
         throwTimeDelta = throwData.throwTimeDelta;
 
         //initialVelocity = new Vector3(23.2f, 0f, 6.2f);
-        initialVelocity = new Vector3(MathF.Abs((float)throwData.throwDictionary["vx"]), (float)throwData.throwDictionary["vy"], (float)throwData.throwDictionary["vz"]);
+        initialVelocity = new Vector3(MathF.Abs((float)throwData.throwDictionary["vx"]), (float)throwData.throwDictionary["vy"], MathF.Abs((float)throwData.throwDictionary["vz"]));
         initialAttitude = new Vector3((float)throwData.throwDictionary["roll"], (float)throwData.throwDictionary["pitch"], (float)throwData.throwDictionary["yaw"]);
 
         TempTextStatus($"Simulating throw...  {initialVelocity}");

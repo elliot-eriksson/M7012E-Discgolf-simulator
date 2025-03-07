@@ -85,17 +85,16 @@ public class SensorBluetooth : MonoBehaviour
 
         currentThrowState = ThrowState.IDLE;
 
-        Debug.Log("Du kom in i StartNewThrow");
     }
 
 
-    
+
 
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;
     private GattCharacteristic characteristic;
-    //private ulong sensorAddress = 0xF3_54_9C_0C_0C_F5; // Fria sensorn
-    private ulong sensorAddress = 0xC9_65_16_F6_7A_25; //Disc sensorn
+    private ulong sensorAddress = 0xF3_54_9C_0C_0C_F5; // Fria sensorn
+    //private ulong sensorAddress = 0xC9_65_16_F6_7A_25; //Disc sensorn
 
 
 
@@ -138,16 +137,29 @@ public class SensorBluetooth : MonoBehaviour
 
                 // Rotate to world frame
                 Vector3 accelWorld = sensorToWorld * accelLocal;
-                //accelWorld.y -= 9.81f;
-                
+                accelWorld.y -= 9.81f;
 
                 // Integrate
                 float dt = Time.deltaTime;
                 velocity += accelWorld * dt;
-            
-                lastData["vx"] = velocity.x;
+                if (Mathf.Abs((float)velocity.z) > Mathf.Abs((float)velocity.x))
+                {    
+                    lastData["vz"] = velocity.z;
+                } 
+                else
+                {
+                    lastData["vz"] = velocity.x;
+                }
+
+                lastData["vx"] = 0;
                 lastData["vy"] = -velocity.y;
-                lastData["vz"] = velocity.z;
+                //lastData["vz"] = 0;
+
+
+
+
+                //TempTextStatus($"Acceleration {accelLocal}, \n WorldAcc {accelWorld}, \n Velocity {velocity}");
+
                 actualData = lastData;
             }
 
@@ -185,7 +197,6 @@ public class SensorBluetooth : MonoBehaviour
                             int earliestIndex = ringBuffer.Count - consecutiveCount;
                             throwStartTime = ringBuffer[earliestIndex].time;
                             dynamicCenter = ringBuffer[ringBuffer.Count - 1].wz;
-                            Debug.Log($"[STATE] Throw DETECTED at {throwStartTime:F3}, temporaryCenter={dynamicCenter:F2}");
                         }
                     }
                     break;
@@ -206,7 +217,6 @@ public class SensorBluetooth : MonoBehaviour
                             for (int i = ringBuffer.Count - framesToAvg; i < ringBuffer.Count; i++)
                                 sum += ringBuffer[i].wz;
                             dynamicCenter = sum / framesToAvg;
-                            Debug.Log($"[THROWN] Final center set to {dynamicCenter:F2} after delay");
                         }
 
                         if (finalCenterSet && ringBuffer.Count > 1)
@@ -228,7 +238,6 @@ public class SensorBluetooth : MonoBehaviour
                             if (stableDeltaCounter >= stableSamplesNeeded)
                             {
                                 currentThrowState = ThrowState.IN_FLIGHT;
-                                Debug.Log($"[STATE] Stable flight at {estimatedTimestamp:F3}, center~{dynamicCenter:F2}");
                             }
                         }
                     }
@@ -245,7 +254,6 @@ public class SensorBluetooth : MonoBehaviour
                             {
                                 currentThrowState = ThrowState.DONE;
                                 flightEndTime = estimatedTimestamp;
-                                Debug.Log($"[STATE] Flight ended at {flightEndTime:F3}");
                             }
                         }
                         else
@@ -284,7 +292,6 @@ public class SensorBluetooth : MonoBehaviour
             }
 
             UpdateConnectionStatus("Connected to: " + device.Name);
-            Debug.Log("Connected to: " + device.Name);
 
             var servicesResult = await device.GetGattServicesAsync();
             if (servicesResult.Status != GattCommunicationStatus.Success)

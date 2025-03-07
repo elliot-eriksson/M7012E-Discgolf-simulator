@@ -720,7 +720,7 @@ PlayerSettings:
   platformCapabilities:
     WindowsStoreApps:
       GazeInput: True
-      Bluetooth: True
+      Bluetooth: False
       PrivateNetworkClientServer: True
       InternetClientServer: True
       SpatialPerception: True
@@ -778,7 +778,7 @@ PlayerSettings:
   embeddedLinuxEnableGamepadInput: 1
   hmiLogStartupTiming: 0
   hmiCpuConfiguration: 
-  apiCompatibilityLevel: 6
+  apiCompatibilityLevel: 3
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
   cloudProjectId: da6c020e-6b7d-4c4b-8f9b-9997831be29e
