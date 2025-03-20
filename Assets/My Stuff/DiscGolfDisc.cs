@@ -127,12 +127,7 @@ public class DiscGolfDisc : MonoBehaviour
     // The initial attitude is set to zero (no initial rotation) by default.
     public DiscState InitializeShotWithVelocity(Vector3 velocity, Vector3 position, Vector3 attitude)
     {
-        //DiscState state = new DiscState();
-        //state.Position = position;
-        //state.Velocity = velocity;
-        //state.Attitude = new Vector3(attitude.x * Mathf.Deg2Rad, attitude.y * Mathf.Deg2Rad, attitude.z * Mathf.Deg2Rad);
-        //return state;
-
+        
         CurrentState = new DiscState(); // Store in the class
         CurrentState.Position = position;
         CurrentState.Velocity = velocity;
@@ -172,14 +167,7 @@ public class DiscGolfDisc : MonoBehaviour
         return states;
 
     }
-    private void FlightControllerStatus(string status)
-    {
-        if (flightControllerText != null)
-        {
-            flightControllerText.text = status;
 
-        }
-    }
 
 }
 

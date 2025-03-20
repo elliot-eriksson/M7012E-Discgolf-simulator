@@ -22,13 +22,9 @@ public class DiscThrowSimulation : MonoBehaviour
     public Vector3 initialVelocity;
     public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
     public Vector3 initialAttitude;
-    //public float spinrate;
+    public float spinrate = 0;
 
-    //public Vector3 initialVelocity = new Vector3(23.2f, 0f, 6.2f);
-    //public Vector3 initialPosition = new Vector3(0f, 1.5f, 0f);
-    //public Vector3 initialAttitude = new Vector3(15.5f, 21.8f, -31.6f); // (roll, pitch, yaw) in radians
-    public float spinrate = 20f;
-    //public float mass, diameter, I_xy, I_z, coefficient_drag, coefficient_lift, coefficient_mass; // disc constants
+    // Disc properties 
     public float mass = 0.175f;
     public float diameter = 0.205f;
     public float I_xy = 0.002f;
@@ -44,7 +40,6 @@ public class DiscThrowSimulation : MonoBehaviour
     public float throwTimeDelta;
 
     private ThrowData currentThrow;
-    //private int sampleCount = 100;
     private List<Vector3> logDataPoints;
 
     void OnEnable()
@@ -58,43 +53,34 @@ public class DiscThrowSimulation : MonoBehaviour
     }
 
 
-
+    // Retrieve the throw data from the Bluetooth script and map it to the disc properties
     void SimulateThrow(ThrowData throwData)
     {
         currentThrow = throwData;
 
         initialAcceleration = new Vector3((float)throwData.throwDictionary["ax"], (float)throwData.throwDictionary["ay"], (float)throwData.throwDictionary["az"]);
         initialAngularVelocity = new Vector3((float)throwData.throwDictionary["wx"], (float)throwData.throwDictionary["wy"], (float)throwData.throwDictionary["wz"]);
-        spinrate = (float)throwData.throwDictionary["wx"];
+        spinrate = (float)throwData.throwDictionary["wz"];
 
         timeOfThrow = throwData.timeOfThrow;
         throwTimeDelta = throwData.throwTimeDelta;
 
-        //initialVelocity = new Vector3(23.2f, 0f, 6.2f);
         initialVelocity = new Vector3(MathF.Abs((float)throwData.throwDictionary["vx"]), (float)throwData.throwDictionary["vy"], MathF.Abs((float)throwData.throwDictionary["vz"]));
         initialAttitude = new Vector3((float)throwData.throwDictionary["roll"], (float)throwData.throwDictionary["pitch"], (float)throwData.throwDictionary["yaw"]);
 
-        TempTextStatus($"Simulating throw...  {initialVelocity}");
 
-        //spinrate = 20f;
         disc = new DiscGolfDisc(mass, diameter, I_xy, I_z, coefficient_drag, coefficient_lift, coefficient_mass, spinrate);
 
-
         RunSimulation();
 
-    }    
-    public void simRunCallsPrivateRunSim()
-    {
-
-        RunSimulation();
     }
-    //GJORDE DENNA PUBLIC MEN VAR PRIVATE
+
+    // Run the simulation with the given parameters
     private void RunSimulation()
     {
         //TempTextStatus($"Simulating throw...  {initialPosition}");
 
         DiscState initialState = disc.InitializeShotWithVelocity(initialVelocity, initialPosition, initialAttitude);
-        UpdateConnectionStatus($"initialState {initialState.Attitude}");
         trajectory = disc.Simulate(initialState, dt, simulationTime);
 
         int totalPoints = trajectory.Count;
@@ -115,29 +101,12 @@ public class DiscThrowSimulation : MonoBehaviour
             // We want (x, y, z) with y as elevation, so swap y and z.
             Vector3 loggedPoint = new Vector3(s.Position.x, s.Position.y, s.Position.z);
             logDataPoints.Add(loggedPoint);
-            //UpdateConnectionStatus($"Simulating point {i + 1}/{sampleCount}: {loggedPoint}");
 
         }
 
-        UpdateConnectionStatus($"First point: {logDataPoints[0]}");
 
         OnThrowSimulated?.Invoke(logDataPoints);
 
     }
-    private void UpdateConnectionStatus(string status)
-    {
-        if (simulationText != null)
-        {
-            simulationText.text = status;
 
-        }
-    }
-
-    private void TempTextStatus(string status)
-    {
-        if (tempText != null)
-        {
-            tempText.text = status;
-        }
-    }
 }

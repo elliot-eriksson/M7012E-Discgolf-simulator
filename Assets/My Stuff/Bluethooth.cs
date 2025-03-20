@@ -20,9 +20,6 @@ public class SensorBluetooth : MonoBehaviour
 
     private bool isDetectingThrow = false; // Flag to control if we are detecting a throw
 
-    public TextMeshProUGUI connectionStatusText;
-    //public TextMeshProUGUI tempText; 
-
     [SerializeField] private float stableDelay = 0.2f;                  //Delay range for stability check
     [SerializeField] private float changeThreshold = 100f;              //Threshold for 
     [SerializeField] private float throwThreshold = 600f;
@@ -61,6 +58,8 @@ public class SensorBluetooth : MonoBehaviour
         public float time;
         public float wz;
     }
+
+    // Function for resetting the throw detection process
     public void StartNewThrowDetection()
     {
         // Start the throw detection process
@@ -89,7 +88,7 @@ public class SensorBluetooth : MonoBehaviour
 
 
 
-
+    // Used to ensure that the build passes in unity editor
 #if UNITY_WSA && !UNITY_EDITOR
     private BluetoothLEDevice device;
     private GattCharacteristic characteristic;
@@ -103,12 +102,13 @@ public class SensorBluetooth : MonoBehaviour
     {
         Application.targetFrameRate = 30;
         estimatedTimestamp = Time.time; // Start timestamp at Unity's current time
-        UpdateConnectionStatus("Connecting...");
+        //UpdateConnectionStatus("Connecting...");
         isDetectingThrow = true;
         ConnectToDevice(sensorAddress);
 
     }
 
+    // Main loop for the system
     void Update()
     {
         if (lastData != null && isDetectingThrow)
@@ -142,23 +142,11 @@ public class SensorBluetooth : MonoBehaviour
                 // Integrate
                 float dt = Time.deltaTime;
                 velocity += accelWorld * dt;
-                if (Mathf.Abs((float)velocity.z) > Mathf.Abs((float)velocity.x))
-                {    
-                    lastData["vz"] = velocity.z;
-                } 
-                else
-                {
-                    lastData["vz"] = velocity.x;
-                }
+
 
                 lastData["vx"] = 0;
-                lastData["vy"] = -velocity.y;
-                //lastData["vz"] = 0;
+                lastData["vy"] = velocity.y;
 
-
-
-
-                //TempTextStatus($"Acceleration {accelLocal}, \n WorldAcc {accelWorld}, \n Velocity {velocity}");
 
                 actualData = lastData;
             }
@@ -203,7 +191,6 @@ public class SensorBluetooth : MonoBehaviour
 
                 case ThrowState.THROWN:
                     {
-                        //actualData = lastData;
                         timeSinceThrown += Time.deltaTime;
 
                         // If we haven't set our final center yet and the stableDelay has passed,
@@ -264,7 +251,7 @@ public class SensorBluetooth : MonoBehaviour
                     break;
 
                 case ThrowState.DONE:
-
+                        // Throw is done, create a ThrowData object and invoke the event to ensure the throw is simulated
                         ThrowData throwData = new ThrowData(estimatedTimestamp, timeSinceThrown, actualData);
                         isDetectingThrow = false;
                         isIntegratingVelocity = false;
@@ -272,11 +259,6 @@ public class SensorBluetooth : MonoBehaviour
                         break;
                 }
             } 
-
-            UpdateConnectionStatus($"Timestamp={estimatedTimestamp:F3},\n ax={lastData["ax"]:F3},\n " +
-            $"ay={lastData["ay"]:F3},\n az={lastData["az"]:F3}, \n" +
-            $"Roll={lastData["roll"]:F3},\n Pitch={lastData["pitch"]:F3},\n Yaw={lastData["yaw"]:F3}\n" +
-            $"wx={lastData["wx"]:F3};\n wy= {lastData["wy"]:F3};\n wz= {lastData["wz"]:F3},\n ");
 
     }
 
@@ -287,16 +269,16 @@ public class SensorBluetooth : MonoBehaviour
             device = await BluetoothLEDevice.FromBluetoothAddressAsync(address);
             if (device == null)
             {
-                UpdateConnectionStatus("Device not found. Check if it's turned on.");
+                //UpdateConnectionStatus("Device not found. Check if it's turned on.");
                 return;
             }
 
-            UpdateConnectionStatus("Connected to: " + device.Name);
+            //UpdateConnectionStatus("Connected to: " + device.Name);
 
             var servicesResult = await device.GetGattServicesAsync();
             if (servicesResult.Status != GattCommunicationStatus.Success)
             {
-                UpdateConnectionStatus("Failed to retrieve services. Check Bluetooth permissions.");
+                //UpdateConnectionStatus("Failed to retrieve services. Check Bluetooth permissions.");
                 return;
             }
 
@@ -311,18 +293,18 @@ public class SensorBluetooth : MonoBehaviour
                         await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
                             GattClientCharacteristicConfigurationDescriptorValue.Notify);
                         characteristic.ValueChanged += Characteristic_ValueChanged;
-                        UpdateConnectionStatus("Receiving sensor data...");
+                        //UpdateConnectionStatus("Receiving sensor data...");
                         Debug.Log("Subscribed to sensor data!");
                         return;
                     }
                 }
             }
 
-            UpdateConnectionStatus("No valid characteristics found.");
+            //UpdateConnectionStatus("No valid characteristics found.");
         }
         catch (Exception ex)
         {
-            UpdateConnectionStatus($"Connection error: {ex.Message}");
+            //UpdateConnectionStatus($"Connection error: {ex.Message}");
         }
     }
 
@@ -374,20 +356,13 @@ public class SensorBluetooth : MonoBehaviour
         }
     }
 
-
-    private void UpdateConnectionStatus(string status)
-    {
-        if (connectionStatusText != null)
-        {
-            connectionStatusText.text = status;
-        }
-    }
-
-    //private void TempTextStatus(string status)
+    // Used to debug the system in the HoloLens 2
+    // Needs a text object to display the connection status (not in current project)
+    //private void UpdateConnectionStatus(string status)
     //{
-    //    if (tempText != null)
+    //    if (connectionStatusText != null)
     //    {
-    //        tempText.text = status;
+    //        connectionStatusText.text = status;
     //    }
     //}
 
